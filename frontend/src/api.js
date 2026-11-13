@@ -1,0 +1,63 @@
+// API client for backend integration
+const API_BASE = 'http://localhost:8000/api';
+
+async function apiRequest(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+    ...options,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    const error = new Error(err.detail || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+  if (res.status === 204) return undefined;
+  const text = await res.text();
+  return text ? JSON.parse(text) : undefined;
+}
+
+export const api = {
+  // Auth
+  login: (email, password) => apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  signup: (email, password, name) => apiRequest('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
+  logout: () => apiRequest('/auth/logout', { method: 'POST' }),
+  me: () => apiRequest('/auth/me'),
+
+  // Tasks
+  getTasks: () => apiRequest('/tasks'),
+  createTask: (task) => apiRequest('/tasks', { method: 'POST', body: JSON.stringify(task) }),
+  updateTask: (id, task) => apiRequest(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(task) }),
+  deleteTask: (id) => apiRequest(`/tasks/${id}`, { method: 'DELETE' }),
+  toggleTask: (id) => apiRequest(`/tasks/${id}/toggle`, { method: 'PATCH' }),
+
+  // Approvals
+  getApprovals: () => apiRequest('/approvals?status=all'),
+  createApproval: (proposal) => apiRequest('/approvals', { method: 'POST', body: JSON.stringify(proposal) }),
+  decideApproval: (id, decision) => apiRequest(`/approvals/${id}`, { method: 'PATCH', body: JSON.stringify(decision) }),
+
+  // Activity
+  getActivity: () => apiRequest('/activity'),
+
+  // Emails (Activepieces)
+  getEmails: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiRequest(`/emails?${qs}`);
+  },
+  getEmail: (id) => apiRequest(`/emails/${id}`),
+
+  // Settings
+  getSettings: () => apiRequest('/auth/me'),
+  saveSettings: (settings) => apiRequest('/auth/me', { method: 'PATCH', body: JSON.stringify(settings) }),
+
+  // Activepieces status
+  getActivepiecesStatus: () => apiRequest('/integrations/activepieces/status'),
+
+  // Integrations
+  getGoogleStatus: () => apiRequest('/integrations/google/status'),
+  disconnectGoogle: () => apiRequest('/integrations/google', { method: 'DELETE' }),
+};
+
+export default api;
