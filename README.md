@@ -66,13 +66,26 @@ uvicorn app.main:app --reload --port 8000
 ```powershell
 cd frontend
 npm install
-npm run dev          # http://localhost:3000
+copy .env.example .env.local
+npm run dev          # Vite prints the local URL (usually http://localhost:5173)
 ```
 
-The frontend proxies `/api/*` to FastAPI (see `next.config.ts`), so the
-browser only ever talks to one origin and the session cookie stays same-site.
+### 3. Deploy the app
 
-### 3. Run tests
+The Netlify site serves the Vite frontend and proxies `/api/*` to the FastAPI
+backend through a Netlify Function, keeping session cookies same-site.
+
+1. Create a Supabase Postgres database and deploy this repository to Render
+   using `render.yaml`.
+2. In Render, set `DATABASE_URL` to the Supabase connection string using the
+   `postgresql+psycopg://` driver, set `BACKEND_URL` to the Render service URL,
+   and provide a valid `CREDENTIALS_ENCRYPTION_KEY`. Render generates
+   `SESSION_SECRET`.
+3. In Netlify, set `BACKEND_API_URL` to the Render URL ending in `/api`, then
+   trigger a new deploy. If your Netlify site uses a different domain, update
+   `CORS_ORIGINS` in Render to include that exact origin.
+
+### 4. Run tests
 
 ```powershell
 cd backend
