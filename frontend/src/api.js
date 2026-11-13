@@ -1,7 +1,14 @@
 // API client for backend integration
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? 'http://localhost:8000/api' : '')
+).replace(/\/+$/, '');
 
 async function apiRequest(path, options = {}) {
+  if (!API_BASE) {
+    throw new Error('Backend API URL is not configured. Set VITE_API_BASE_URL in Netlify to your deployed backend URL ending in /api.');
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
