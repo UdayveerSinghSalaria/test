@@ -327,7 +327,7 @@ def test_endpoints_require_auth(client: TestClient):
 def test_emails_409_when_gmail_not_connected(auth_client: TestClient):
     r = auth_client.get("/api/emails")
     assert r.status_code == 409
-    assert "not connected" in r.json()["detail"].lower()
+    assert "not configured" in r.json()["detail"].lower() or "no mail provider" in r.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

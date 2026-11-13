@@ -1,161 +1,86 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import React, { useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
+import { ClipboardList, CheckCircle2, CalendarClock, Sparkles, Paperclip, Globe, CalendarDays, ListChecks, Plus, ArrowUpRight, Trash2, Pencil, ChevronLeft, ChevronRight, Send, Check, X, Download, Search, Trophy, Activity as ActI, BarChart3, Bot, Circle, Loader2, Zap, Shield, MousePointerClick } from "lucide-react";
+import { useApp } from "@/context/app-context";
 import { AppShell } from "@/components/layout/app-shell";
+import { Card, Title, Badge, Page, Empty, TaskModal } from "@/components/ui";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { apiGet, apiPost, ApiError } from "@/lib/api";
-import type { Approval } from "@/types";
+import { Input } from "@/components/ui/input";
 
-export default function ApprovalsPage() {
-  const [items, setItems] = useState<Approval[]>([]);
-  const [filter, setFilter] = useState<"pending" | "all">("pending");
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const tm = (t: number) => new Date(t).toLocaleString("en-IN", { hour: "numeric", minute: "2-digit", day: "numeric", month: "short" });
 
-  const load = useCallback(async () => {
-    try {
-      const rows = await apiGet<Approval[]>(
-        `/api/approvals?status=${filter}`
-      );
-      setItems(rows);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load approvals.");
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+function ApprovalsPageContent() {
+  const { proposals, decideProposal } = useApp();
+  const router = useRouter();
+  const [tab, setTab] = useState("pending");
+  const [ed, setEd] = useState<Record<string, any[]>>({});
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const resolve = async (id: string, decision: "approve" | "reject") => {
-    setBusyId(id);
-    try {
-      await apiPost(`/api/approvals/${id}/${decision}`);
-      setItems((prev) => prev.filter((a) => a.id !== id));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Action failed.");
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const list = proposals.filter(p => p.status === tab);
+  const tasksOf = (p: any) => ed[p.id] || p.tasks;
+  const chg = (p: any, id: string, k: string, v: string) => setEd({ ...ed, [p.id]: tasksOf(p).map(t => t.id === id ? { ...t, [k]: v } : t) });
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 md:px-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
-            <p className="text-sm text-muted-foreground">
-              Actions the assistant wants to take need your explicit consent.
-            </p>
-          </div>
-          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-            <TabsList>
-              <TabsTrigger value="pending">Pending</TabsTrigger>
-              <TabsTrigger value="all">All</TabsTrigger>
-            </TabsList>
-          </Tabs>
+      <Page title="Approvals" sub="Nothing is created until you approve it.">
+        <div className="glass rounded-xl inline-flex p-1">
+          {["pending", "approved", "rejected"].map(t => (
+            <Button key={t} variant={tab === t ? "primary" : "secondary"} size="sm" onClick={() => setTab(t)} className="capitalize">
+              {t.charAt(0).toUpperCase() + t.slice(1)} ({proposals.filter(p => p.status === t).length})
+            </Button>
+          ))}
         </div>
-
-        {error && (
-          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-
-        {loading ? (
-          <div className="space-y-3">
-            {[0, 1].map((i) => (
-              <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
-            ))}
-          </div>
-        ) : items.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-              <ShieldCheck className="size-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">
-                {filter === "pending"
-                  ? "Nothing waiting for approval. The assistant hasn't requested any actions."
-                  : "No approval history yet."}
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {items.map((a) => (
-              <Card key={a.id}>
-                <CardContent className="space-y-3 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs">
-                        {a.action}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(a.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <Badge
-                      variant={
-                        a.status === "approved"
-                          ? "default"
-                          : a.status === "rejected"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {a.status}
-                    </Badge>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {list.map(p => (
+            <Card key={p.id}>
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="font-bold">{p.title}</h3>
+                  <p className="text-xs text-ink/55">{p.source} · {tm(p.created)}</p>
+                </div>
+                <Badge variant={p.status === "pending" ? "medium" : p.status === "approved" ? "low" : "high"}>{p.status.charAt(0).toUpperCase() + p.status.slice(1)}</Badge>
+              </div>
+              <div className="space-y-2">
+                {tasksOf(p).map(t => p.status === "pending" ? (
+                  <div key={t.id} className="flex flex-wrap gap-2">
+                    <Input value={t.title} onChange={e => chg(p, t.id, "title", e.target.value)} />
+                    <Input type="date" value={t.due} onChange={e => chg(p, t.id, "due", e.target.value)} className="inp w-auto" />
                   </div>
-
-                  {/* The exact payload the agent wants to execute */}
-                  <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 text-xs leading-relaxed">
-                    {JSON.stringify(a.payload, null, 2)}
-                  </pre>
-
-                  {a.status === "pending" && (
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => resolve(a.id, "approve")}
-                        disabled={busyId === a.id}
-                      >
-                        {busyId === a.id ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="size-3.5" />
-                        )}
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => resolve(a.id, "reject")}
-                        disabled={busyId === a.id}
-                      >
-                        {busyId === a.id ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <XCircle className="size-3.5" />
-                        )}
-                        Reject
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                ) : (
+                  <div key={t.id} className="flex items-center gap-2 text-sm">
+                    <Badge variant={t.priority.toLowerCase() as "high" | "medium" | "low"}>{t.priority}</Badge>
+                    {t.title}
+                    <span className="ml-auto text-xs text-ink/55">{fmtD(t.due)}</span>
+                  </div>
+                ))}
+              </div>
+              {p.status === "pending" && (
+                <div className="mt-4 flex gap-2">
+                  <Button className="flex-1" onClick={() => decideProposal(p.id, { approved: true, tasks: tasksOf(p) })}><Check size={16} />Approve</Button>
+                  <Button variant="secondary" className="flex-1 text-rose-600" onClick={() => decideProposal(p.id, { approved: false })}><X size={16} />Reject</Button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+        {!list.length && <Empty text={`No ${tab} proposals. Generate a plan in Agent Studio.`} />}
+      </Page>
     </AppShell>
+  );
+}
+
+function fmtD(d: string) {
+  if (!d) return "No date";
+  const [, m, day] = d.split("-");
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return MONTHS[+m - 1] + " " + +day;
+}
+
+export default function ApprovalsPage() {
+  return (
+    <Suspense fallback={<div className="flex h-[400px] items-center justify-center">Loading…</div>}>
+      <ApprovalsPageContent />
+    </Suspense>
   );
 }

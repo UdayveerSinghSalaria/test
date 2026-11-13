@@ -7,6 +7,16 @@
  */
 
 import { API_BASE } from "./config";
+import type {
+  Task,
+  TaskCreate,
+  TaskUpdate,
+  Proposal,
+  ProposalCreate,
+  ProposalDecide,
+  ActivityEntry,
+  UserSettings,
+} from "@/types";
 
 export class ApiError extends Error {
   status: number;
@@ -103,3 +113,26 @@ export async function* apiStream(
     }
   }
 }
+
+// ===== Tasks =====
+export const getTasks = () => apiGet<Task[]>("/api/tasks");
+export const createTask = (body: TaskCreate) => apiPost<Task>("/api/tasks", body);
+export const updateTask = (id: string, body: TaskUpdate) => apiPatch<Task>(`/api/tasks/${id}`, body);
+export const deleteTask = (id: string) => apiDelete<void>(`/api/tasks/${id}`);
+export const toggleTask = (id: string) => apiPatch<Task>(`/api/tasks/${id}/toggle`, {});
+
+// ===== Approvals =====
+export const getApprovals = () => apiGet<Proposal[]>("/api/approvals");
+export const createApproval = (body: ProposalCreate) => apiPost<Proposal>("/api/approvals", body);
+export const decideApproval = (id: string, body: ProposalDecide) => apiPatch<Proposal>(`/api/approvals/${id}`, body);
+
+// ===== Activity =====
+export const getActivity = () => apiGet<ActivityEntry[]>("/api/activity");
+
+// ===== Settings =====
+export const getSettings = () => apiGet<UserSettings>("/api/auth/me");
+export const updateSettings = (body: Partial<UserSettings>) => apiPatch<UserSettings>("/api/auth/me", body);
+
+// ===== Agent =====
+export const streamAgent = (body: { prompt: string }, signal?: AbortSignal) =>
+  apiStream("/api/assistant", body, signal);

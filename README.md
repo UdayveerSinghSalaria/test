@@ -99,6 +99,11 @@ security-critical variable is missing or invalid — it never silently degrades.
 | `CORS_ORIGINS` | optional | defaults to `http://localhost:3000` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Gmail | OAuth client from Google Cloud Console |
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | for agent | any OpenAI-compatible endpoint or Anthropic |
+| `ACTIVEPIECES_API_KEY` | optional | mail fallback via teammate's Activepieces |
+| `ACTIVEPIECES_PROJECT_ID` | optional | project containing Gmail connection |
+| `ACTIVEPIECES_GMAIL_CONNECTION_ID` | optional | connection externalId from teammate's project |
+| `ACTIVEPIECES_SEARCH_FLOW_ID` | optional | "App Mail Search" flow ID (provisioned) |
+| `ACTIVEPIECES_GET_FLOW_ID` | optional | "App Mail Get" flow ID (provisioned) |
 
 ### Google Cloud setup (the one manual step)
 
@@ -112,6 +117,38 @@ security-critical variable is missing or invalid — it never silently degrades.
 Requested scopes (nothing more): `openid`, `email`, `profile`,
 `https://www.googleapis.com/auth/gmail.readonly` — **no send/write scope is
 requested in this milestone.**
+
+### Activepieces mail fallback (no Google Cloud needed)
+
+If Google Cloud credentials are unavailable, you can use a teammate's
+Activepieces instance with a shared Gmail connection. The teammate provisions
+two flows once; you just add the flow IDs and API key to `backend/.env`.
+
+1. Teammate runs the provisioning script (creates flows in their project):
+   ```powershell
+   cd backend
+   .\.venv\Scripts\python.exe scripts/provision_activepieces.py
+   ```
+   This prints `ACTIVEPIECES_SEARCH_FLOW_ID` and `ACTIVEPIECES_GET_FLOW_ID`.
+
+2. Add to your `backend/.env`:
+   ```
+   ACTIVEPIECES_API_KEY=<teammate's project-scoped key>
+   ACTIVEPIECES_PROJECT_ID=<teammate's project ID>
+   ACTIVEPIECES_GMAIL_CONNECTION_ID=<Gmail connection externalId>
+   ACTIVEPIECES_SEARCH_FLOW_ID=<from step 1>
+   ACTIVEPIECES_GET_FLOW_ID=<from step 1>
+   ```
+
+3. Restart the backend. The app will now:
+   - Prefer Activepieces if configured (no per-user OAuth).
+   - Fall back to Google OAuth if Activepieces is not set.
+   - Return honest `409` if neither is available.
+
+**Honest labeling:** The Integrations page shows "Activepieces (shared teammate
+mailbox)" with the account email. The webhook URLs are unguessable but
+unauthenticated — only the API key is secret. Free-plan credit exhaustion
+surfaces as `402 PAYMENT_REQUIRED`. The teammate can revoke the key at any time.
 
 ### Supabase / PostgreSQL
 
@@ -131,20 +168,21 @@ production schema management.)
 ```
 frontend/  Next.js app (single origin via /api rewrite proxy)
   app/           login · dashboard · assistant · tasks · inbox · calendar
-                 approvals · activity · integrations · settings
+                  approvals · activity · integrations · settings
   components/    layout (sidebar, shell) + shadcn ui primitives
   lib/           api.ts (central client + NDJSON stream) · auth.ts · config.ts
   types/         mirrors the Pydantic schemas
 
 backend/  FastAPI
   api/           auth · integrations (OAuth) · emails · tasks · approvals
-                 activity · assistant (streaming) · deps (auth guard)
+                  activity · assistant (streaming) · deps (auth guard)
   services/      google_oauth (state, exchange, refresh) · gmail_service
-                 (list/search/detail, multipart decode, HTML sanitization)
-                 token_service (encrypt, auto-refresh, disconnect)
+                  (list/search/detail, multipart decode, HTML sanitization)
+                  token_service (encrypt, auto-refresh, disconnect)
+                  activepieces_service (sync webhook calls; no provisioning at runtime)
   agents/        planner (structured ExecutionPlan) · orchestrator (LangGraph
-                 plan→act→summarize with approval gate) · tools (registry;
-                 unknown tools refused) · llm (configurable provider)
+                  plan→act→summarize with approval gate) · tools (registry;
+                  unknown tools refused) · llm (configurable provider)
   security/      encryption (Fernet) · sessions (signed httpOnly cookies)
   models/        users · integrations · tasks · approvals · activity
 ```

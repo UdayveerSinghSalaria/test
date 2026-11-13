@@ -7,7 +7,7 @@
  */
 
 export const APP_NAME =
-  process.env.NEXT_PUBLIC_APP_NAME ?? "AI Work Assistant";
+  process.env.NEXT_PUBLIC_APP_NAME ?? "SaarthiFlow";
 
 /**
  * Backend base URL.
@@ -24,25 +24,26 @@ export const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "",
     items: [
-      { href: "/dashboard", label: "Overview", icon: "LayoutDashboard" },
-      { href: "/assistant", label: "AI Assistant", icon: "Sparkles" },
-      { href: "/tasks", label: "My Tasks", icon: "ListTodo" },
+      { href: "/", label: "Overview", icon: "LayoutDashboard" },
+      { href: "/agent", label: "Agent Studio", icon: "Sparkles" },
+      { href: "/space", label: "My Space", icon: "ListTodo" },
+      { href: "/approvals", label: "Approvals", icon: "ShieldCheck" },
+      { href: "/activity", label: "Activity", icon: "History" },
     ],
   },
   {
-    label: "Workspace",
+    label: "Tools",
     items: [
-      { href: "/inbox", label: "Inbox", icon: "Inbox" },
-      { href: "/calendar", label: "Calendar", icon: "Calendar", badge: "soon" },
-      { href: "/approvals", label: "Approvals", icon: "ShieldCheck" },
-      { href: "/activity", label: "Activity History", icon: "History" },
+      { href: "/calendar", label: "Calendar", icon: "Calendar" },
+      { href: "/quick-actions", label: "Quick Actions", icon: "Zap" },
+      { href: "/analytics", label: "Analytics", icon: "BarChart3" },
     ],
   },
   {
     label: "Configuration",
     items: [
-      { href: "/integrations", label: "Integrations", icon: "Plug" },
       { href: "/settings", label: "Settings", icon: "Settings" },
+      { href: "/extension", label: "Get Extension", icon: "Puzzle" },
     ],
   },
 ];

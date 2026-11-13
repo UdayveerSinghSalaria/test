@@ -18,12 +18,15 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..models import Activity, ActivityKind, Approval, ApprovalStatus, Task, TaskPriority, TaskStatus
+from ..services.activepieces_service import ActivepiecesError, get_activepieces_service
 from ..services.gmail_service import GmailError, GmailService
 from ..services.google_oauth import OAuthError
 from ..services.token_service import TokenService
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # Actions that MUST go through human approval before executing.
 SENSITIVE_ACTIONS = {"create_task", "draft_email", "send_email", "create_calendar_event"}
@@ -67,13 +70,127 @@ def log_activity(
     ctx.db.commit()
 
 
+def _provider_for(ctx: ToolContext) -> str:
+    """Determine mail provider: activepieces > google > none."""
+    if settings.activepieces_api_key and settings.activepieces_search_flow_id:
+        return "activepieces"
+    if ctx.token_provider is not None:
+        return "google"
+    return "none"
+
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
 async def _require_token(ctx: ToolContext) -> str:
     if ctx.token_provider is None:
-        raise OAuthError("Gmail is not connected. Connect your Google account first.")
+        raise OAuthError("No mail provider connected. Connect Google or enable Activepieces.")
     return await ctx.token_provider()
+
+
+async def search_emails(ctx: ToolContext, *, query: str, max_results: int = 10) -> dict:
+    """Search the mail inbox (Gmail syntax supported for both providers)."""
+    provider = _provider_for(ctx)
+    
+    if provider == "activepieces":
+        svc = get_activepieces_service()
+        try:
+            results = svc.search(ctx.user_id, q=query, max_results=min(max_results, 25))
+        except ActivepiecesError as exc:
+            log_activity(ctx, action="search_emails", status="error", detail=str(exc))
+            raise
+        log_activity(ctx, action="search_emails", detail=f"q='{query[:80]}' n={len(results)}")
+        return {
+            "emails": [
+                {
+                    "id": e.id,
+                    "from_name": e.from_email.split("<")[0].strip().strip('"') if "<" in e.from_email else e.from_email,
+                    "from": e.from_email,
+                    "subject": e.subject,
+                    "date": e.date,
+                    "snippet": e.snippet,
+                    "unread": e.is_unread,
+                }
+                for e in results
+            ],
+            "count": len(results),
+        }
+    
+    if provider == "google":
+        token = await _require_token(ctx)
+        try:
+            results, _ = await GmailService().search(token, query, max_results=min(max_results, 25))
+        except GmailError as exc:
+            log_activity(ctx, action="search_emails", status="error", detail=str(exc))
+            raise
+        log_activity(ctx, action="search_emails", detail=f"q='{query[:80]}' n={len(results)}")
+        return {
+            "emails": [
+                {
+                    "id": e.id,
+                    "from_name": e.sender_name,
+                    "from": e.sender_email,
+                    "subject": e.subject,
+                    "date": e.received_at.isoformat() if e.received_at else None,
+                    "snippet": e.snippet,
+                    "unread": e.is_unread,
+                }
+                for e in results
+            ],
+            "count": len(results),
+        }
+    
+    raise OAuthError("No mail provider configured. Connect Google or enable Activepieces.")
+
+
+async def fetch_email(ctx: ToolContext, *, email_id: str) -> dict:
+    """Fetch one email's full content (text preferred, HTML sanitized)."""
+    if not email_id or len(email_id) > 128 or not all(c.isalnum() or c in "-_" for c in email_id):
+        raise ValueError("Invalid email id.")
+    
+    provider = _provider_for(ctx)
+    
+    if provider == "activepieces":
+        svc = get_activepieces_service()
+        try:
+            detail = svc.get_detail(ctx.user_id, email_id)
+        except ActivepiecesError as exc:
+            log_activity(ctx, action="fetch_email", status="error", detail=str(exc))
+            raise
+        log_activity(ctx, action="fetch_email", detail=f"id={email_id}")
+        body = detail.body_text or _html_to_text(detail.body_html)
+        return {
+            "id": detail.id,
+            "from_name": detail.from_email.split("<")[0].strip().strip('"') if "<" in detail.from_email else detail.from_email,
+            "from": detail.from_email,
+            "to": [detail.to_email],
+            "subject": detail.subject,
+            "date": detail.date,
+            "body": body[:20_000],
+            "attachments": detail.attachments,
+        }
+    
+    if provider == "google":
+        token = await _require_token(ctx)
+        try:
+            detail = await GmailService().get_detail(token, email_id)
+        except GmailError as exc:
+            log_activity(ctx, action="fetch_email", status="error", detail=str(exc))
+            raise
+        log_activity(ctx, action="fetch_email", detail=f"id={email_id}")
+        body = detail.body_text or _html_to_text(detail.body_html_sanitized)
+        return {
+            "id": detail.id,
+            "from_name": detail.sender_name,
+            "from": detail.sender_email,
+            "to": [t.address for t in detail.to],
+            "subject": detail.subject,
+            "date": detail.received_at.isoformat() if detail.received_at else None,
+            "body": body[:20_000],
+            "attachments": detail.attachments,
+        }
+    
+    raise OAuthError("No mail provider configured. Connect Google or enable Activepieces.")
 
 
 async def search_emails(ctx: ToolContext, *, query: str, max_results: int = 10) -> dict:

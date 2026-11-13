@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="")
     llm_api_key: str = Field(default="")
 
+    # --- Activepieces (optional; mail fallback when Google unavailable) ------
+    activepieces_base_url: str = Field(default="https://cloud.activepieces.com/api/v1")
+    activepieces_api_key: str = Field(default="")
+    activepieces_project_id: str = Field(default="")
+    activepieces_search_flow_id: str = Field(default="")
+    activepieces_get_flow_id: str = Field(default="")
+
     # --- Validators ---------------------------------------------------------
     @field_validator("cors_origins")
     @classmethod

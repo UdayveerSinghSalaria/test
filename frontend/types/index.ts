@@ -1,90 +1,124 @@
-/** Shared types mirroring the FastAPI Pydantic schemas. */
+/** TypeScript types mirroring FastAPI Pydantic schemas */
 
-export interface User {
+export interface Task {
   id: string;
-  email: string;
-  name: string;
+  title: string;
+  description?: string;
+  project: string;
+  priority: "High" | "Medium" | "Low";
+  status: "todo" | "doing" | "done";
+  due_date: string;
+  source: "agent" | "manual";
   created_at: string;
+  updated_at: string;
 }
 
-export interface Integration {
-  provider: string;
-  provider_email: string;
-  scopes: string[];
-  connected_at: string;
-  token_expiry: string | null;
-  status: string;
+export interface TaskCreate {
+  title: string;
+  description?: string;
+  project?: string;
+  priority?: "High" | "Medium" | "Low";
+  status?: "todo" | "doing" | "done";
+  due_date?: string;
+}
+
+export interface TaskUpdate {
+  title?: string;
+  description?: string;
+  project?: string;
+  priority?: "High" | "Medium" | "Low";
+  status?: "todo" | "doing" | "done";
+  due_date?: string;
+}
+
+export interface ProposalTask {
+  id: string;
+  title: string;
+  project: string;
+  priority: "High" | "Medium" | "Low";
+  due: string;
+}
+
+export interface Proposal {
+  id: string;
+  title: string;
+  source: string;
+  created: number;
+  status: "pending" | "approved" | "rejected";
+  tasks: ProposalTask[];
+  decided_at?: number;
+}
+
+export interface ProposalCreate {
+  title: string;
+  source: string;
+  tasks: ProposalTask[];
+}
+
+export interface ProposalDecide {
+  approved: boolean;
+  tasks?: ProposalTask[];
+}
+
+export interface ActivityEntry {
+  id: string;
+  at: number;
+  type: string;
+  title: string;
+  detail: string;
+  source: string;
+  status: "Completed" | "Pending" | "Rejected" | "Cancelled";
+}
+
+export interface UserSettings {
+  name: string;
+  email: string;
+  role: string;
+  week_start: "Mon" | "Sun";
+  notify: boolean;
 }
 
 export interface EmailSummary {
   id: string;
   thread_id: string;
-  sender_name: string;
-  sender_email: string;
   subject: string;
+  from_email: string;
+  to_email: string;
+  date: string;
   snippet: string;
-  received_at: string | null;
   is_unread: boolean;
+  labels: string[];
 }
 
 export interface EmailListResponse {
   emails: EmailSummary[];
-  next_page_token: string | null;
+  next_page_token?: string;
 }
 
-export interface EmailAddress {
-  name: string;
-  address: string;
-}
-
-export interface EmailDetail extends EmailSummary {
-  to: EmailAddress[];
+export interface EmailDetail {
+  id: string;
+  thread_id: string;
+  subject: string;
+  from_email: string;
+  to_email: string;
+  date: string;
   body_text: string;
-  body_html_sanitized: string;
-  label_ids: string[];
-  attachments: string[];
+  body_html: string;
+  attachments: Array<{
+    id: string;
+    filename: string;
+    mime_type: string;
+    size: number;
+  }>;
+  message_id: string;
+  labels: string[];
 }
 
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: "pending" | "in_progress" | "completed";
-  priority: "low" | "medium" | "high";
-  due_date: string | null;
-  source: string;
-  created_at: string;
-}
-
-export interface Approval {
-  id: string;
-  action: string;
-  payload: Record<string, unknown>;
-  status: "pending" | "approved" | "rejected";
-  created_at: string;
-}
-
-export interface Activity {
-  id: string;
-  kind: "tool_call" | "plan" | "approval" | "error" | "info";
-  action: string;
-  status: string;
+export interface ApiError {
   detail: string;
-  created_at: string;
 }
 
-/** One streamed event from the agent run (assistant page). */
-export interface AgentStep {
-  type: "plan" | "tool_start" | "tool_result" | "approval_required" | "answer" | "error";
-  text: string;
-  tool: string;
-  detail: string;
-  approval_id: string | null;
-}
-
-export interface Health {
-  status: string;
-  app_name: string;
-  llm_configured: boolean;
-  google_oauth_configured: boolean;
+export interface PaginatedResponse<T> {
+  items: T[];
+  next_page_token?: string;
 }

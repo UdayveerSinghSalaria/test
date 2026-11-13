@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { login, signup } from "@/lib/auth";
 import { APP_NAME } from "@/lib/config";
 
@@ -28,7 +28,7 @@ export default function LoginPage() {
       } else {
         await signup(email, password, name);
       }
-      router.replace("/dashboard");
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -40,7 +40,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex items-center justify-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-brand-600 text-white">
             <Sparkles className="size-4" />
           </div>
           <span className="text-lg font-semibold tracking-tight">{APP_NAME}</span>
@@ -51,11 +51,11 @@ export default function LoginPage() {
             <CardTitle className="text-xl">
               {mode === "login" ? "Welcome back" : "Create your account"}
             </CardTitle>
-            <CardDescription>
+            <p className="text-sm text-muted-foreground">
               {mode === "login"
                 ? "Sign in to your workspace"
                 : "Get started with your personal work assistant"}
-            </CardDescription>
+            </p>
           </CardHeader>
           <CardContent>
             <form onSubmit={submit} className="space-y-4">

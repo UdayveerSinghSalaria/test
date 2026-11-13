@@ -78,6 +78,28 @@ def health() -> dict:
     }
 
 
+@app.get("/health")
+def health_root() -> dict:
+    return {
+        "status": "ok",
+        "app_name": settings.app_name,
+        "llm_configured": settings.llm_configured,
+        "google_oauth_configured": bool(
+            settings.google_client_id and settings.google_client_secret
+        ),
+    }
+
+
+@app.get("/")
+def root() -> dict:
+    return {
+        "name": settings.app_name,
+        "version": "0.1.0",
+        "docs": "/api/docs",
+        "health": "/health",
+    }
+
+
 # --- routes -----------------------------------------------------------------
 from .api import (  # noqa: E402  (routers need `app` defined)
     activity,

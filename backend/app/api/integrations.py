@@ -166,3 +166,23 @@ async def google_disconnect(
         raise HTTPException(status_code=404, detail="Gmail is not connected.")
     logger.info("Gmail disconnected for user %s", user.id)
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Activepieces status (read-only; global/shared configuration)
+# ---------------------------------------------------------------------------
+@router.get("/activepieces/status", response_model=IntegrationOut | None)
+async def activepieces_status(
+    user: User = Depends(get_session_user),
+):
+    """Check if Activepieces mail is configured globally."""
+    settings = get_settings()
+    if not (settings.activepieces_api_key and settings.activepieces_search_flow_id):
+        return None
+    return IntegrationOut(
+        provider="activepieces",
+        provider_email="shared teammate mailbox (relan.toshan@gmail.com)",
+        scopes=["gmail.readonly"],
+        connected_at=None,
+        token_expiry=None,
+    )
