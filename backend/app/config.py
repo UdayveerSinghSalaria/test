@@ -112,12 +112,10 @@ class Settings(BaseSettings):
                     "Regenerate: python -c \"from cryptography.fernet import "
                     "Fernet; print(Fernet.generate_key().decode())\""
                 )
-        if self.is_production and not (
-            self.google_client_id and self.google_client_secret
-        ):
+        if bool(self.google_client_id) != bool(self.google_client_secret):
             problems.append(
-                "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are required in "
-                "production for Gmail integration."
+                "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set "
+                "to enable Google OAuth, or both left empty to disable it."
             )
         if problems:
             raise RuntimeError(

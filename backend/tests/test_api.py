@@ -12,9 +12,10 @@ from datetime import datetime, timedelta
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.security.encryption import decrypt, encrypt
 from app.security.sessions import create_session_token, read_session_token
 from app.services.gmail_service import GmailService, sanitize_html
@@ -71,6 +72,31 @@ def test_session_tampered_rejected():
 
 def test_security_config_valid():
     SETTINGS.validate_security()  # must not raise with .env present
+
+
+def test_google_oauth_is_optional_in_production():
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        session_secret="s" * 48,
+        credentials_encryption_key=Fernet.generate_key().decode(),
+        google_client_id="",
+        google_client_secret="",
+    )
+    settings.validate_security()
+
+
+def test_google_oauth_credentials_must_be_configured_as_a_pair():
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        session_secret="s" * 48,
+        credentials_encryption_key=Fernet.generate_key().decode(),
+        google_client_id="client-id",
+        google_client_secret="",
+    )
+    with pytest.raises(RuntimeError, match="must both be set"):
+        settings.validate_security()
 
 
 # ---------------------------------------------------------------------------
