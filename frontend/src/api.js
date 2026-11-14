@@ -39,11 +39,19 @@ async function streamRequest(path, payload, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let receivedEvent = false;
+  let completed = false;
+  const dispatch = line => {
+    const event = JSON.parse(line);
+    receivedEvent = true;
+    if (['answer', 'error', 'approval_required'].includes(event.type)) completed = true;
+    onEvent(event);
+  };
   const emitLines = () => {
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
     lines.forEach(line => {
-      if (line.trim()) onEvent(JSON.parse(line));
+      if (line.trim()) dispatch(line);
     });
   };
 
@@ -53,7 +61,9 @@ async function streamRequest(path, payload, onEvent) {
     emitLines();
     if (done) break;
   }
-  if (buffer.trim()) onEvent(JSON.parse(buffer));
+  if (buffer.trim()) dispatch(buffer);
+  if (!receivedEvent) throw new Error('The assistant returned an empty response. Check the backend deployment and logs.');
+  if (!completed) throw new Error('The assistant stream ended before returning a result. Please try again.');
 }
 
 export const api = {

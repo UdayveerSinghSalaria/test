@@ -115,6 +115,52 @@ def test_openai_compatible_llm_requires_a_base_url():
     assert settings.llm_configured
 
 
+def test_nvidia_nim_request_disables_reasoning_trace(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class AsyncClient:
+        def __init__(self, timeout):
+            assert timeout == 60
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return Response()
+
+    monkeypatch.setattr(
+        "app.agents.llm.get_settings",
+        lambda: SimpleNamespace(
+            llm_base_url="https://integrate.api.nvidia.com/v1",
+            llm_model="nvidia/nemotron-3-ultra-550b-a55b",
+            llm_api_key="test-key",
+        ),
+    )
+    monkeypatch.setattr("app.agents.llm.httpx.AsyncClient", AsyncClient)
+    from app.agents.llm import _chat_openai_compatible
+
+    result = asyncio.run(
+        _chat_openai_compatible([{"role": "user", "content": "hi"}], 0.2, 20)
+    )
+    assert result == "ok"
+    assert captured["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["payload"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
 # ---------------------------------------------------------------------------
 # HTML sanitization (email content is untrusted)
 # ---------------------------------------------------------------------------
@@ -391,6 +437,41 @@ def test_agent_can_search_and_read_allowlisted_activepieces_mail(
         assert result["emails"][0]["body"] == "Full message body"
     finally:
         db.close()
+
+
+def test_assistant_stream_returns_final_answer(auth_client: TestClient, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from app.agents.planner import ExecutionPlan, PlanStep
+
+    async def fake_plan(instruction, *, require_llm):
+        return (
+            ExecutionPlan(
+                intent=instruction,
+                steps=[PlanStep(step=1, tool="respond")],
+            ),
+            "llm",
+        )
+
+    async def fake_chat(messages, **kwargs):
+        return "Here is your answer."
+
+    monkeypatch.setattr(
+        "app.agents.orchestrator.get_settings",
+        lambda: SimpleNamespace(llm_configured=True),
+    )
+    monkeypatch.setattr("app.agents.orchestrator.make_plan", fake_plan)
+    monkeypatch.setattr("app.agents.orchestrator.chat", fake_chat)
+
+    response = auth_client.post(
+        "/api/assistant/run",
+        json={"message": "Answer directly."},
+    )
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert any(event["type"] == "answer" for event in events)
+    assert events[-1]["text"] == "Here is your answer."
 
 
 def test_gmail_auth_error_maps_to_friendly():

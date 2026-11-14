@@ -353,15 +353,21 @@ async def run_agent(
     log_activity(ctx, action="agent_run", detail=f"instruction='{instruction[:80]}'",
                  kind=ActivityKind.info)
 
-    # Stream node-by-node; each node appends UI events to state["events"].
+    # LangGraph yields each node's state update; merge it to preserve the final
+    # answer and approval flags as well as the streamed event list.
+    final_state = dict(state)
     emitted = 0
     try:
-        async for _update in graph.astream(state, stream_mode="updates"):
-            events: list[dict] = state.get("events", [])
+        async for update in graph.astream(state, stream_mode="updates"):
+            for node_output in update.values():
+                if isinstance(node_output, dict):
+                    final_state.update(node_output)
+
+            events: list[dict] = final_state.get("events", [])
             for ev in events[emitted:]:
                 yield AgentStep(**ev)
             emitted = len(events)
-            if state.get("error"):
+            if final_state.get("error"):
                 break
     except Exception:
         logger.exception("agent run failed run_id=%s", run_id)
@@ -371,9 +377,9 @@ async def run_agent(
         return
 
     # Final drain (events appended in the last node).
-    events = state.get("events", [])
+    events = final_state.get("events", [])
     for ev in events[emitted:]:
         yield AgentStep(**ev)
 
-    if not state.get("answer") and not state.get("needs_approval") and not state.get("error"):
+    if not final_state.get("answer") and not final_state.get("needs_approval") and not final_state.get("error"):
         yield AgentStep(type="error", text="The agent finished without producing an answer.")

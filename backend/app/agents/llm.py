@@ -58,16 +58,20 @@ async def chat_json(messages: list[dict], *, temperature: float = 0.2) -> str:
 async def _chat_openai_compatible(messages: list[dict], temperature: float, max_tokens: int) -> str:
     s = get_settings()
     base = s.llm_base_url.rstrip("/")
+    payload = {
+        "model": s.llm_model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if base.startswith("https://integrate.api.nvidia.com/"):
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {s.llm_api_key}"},
-            json={
-                "model": s.llm_model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
+            json=payload,
         )
     if resp.status_code == 401:
         raise LLMError("The AI provider rejected the API key (check LLM_API_KEY).")
