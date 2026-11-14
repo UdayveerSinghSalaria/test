@@ -13,7 +13,7 @@ Security invariants enforced here:
   * The OAuth `state` is generated with secrets.token_urlsafe and verified
     on return (CSRF protection).
   * Redirect URI is exactly the configured value; no wildcards.
-  * Scope is fixed to readonly Gmail + openid/email/profile.
+  * Gmail scopes are fixed to readonly access + sending + openid/email/profile.
 """
 
 from __future__ import annotations
@@ -33,12 +33,12 @@ logger = logging.getLogger(__name__)
 STATE_COOKIE = "awa_oauth_state"
 STATE_MAX_AGE = 600  # 10 minutes
 
-# Never requested in this milestone: any write/send scope.
-READONLY_GMAIL_SCOPES = [
+GMAIL_SCOPES = [
     "openid",
     "email",
     "profile",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 
@@ -93,7 +93,7 @@ class GoogleOAuthService:
             "client_id": self.settings.google_client_id,
             "redirect_uri": self.settings.google_redirect_uri,
             "response_type": "code",
-            "scope": " ".join(READONLY_GMAIL_SCOPES),
+            "scope": " ".join(GMAIL_SCOPES),
             "state": state,
             "access_type": "offline",       # request a refresh token
             "prompt": "consent",            # ensure refresh_token is returned

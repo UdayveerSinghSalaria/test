@@ -79,7 +79,6 @@ def api_get(path: str, params: Optional[Dict] = None) -> Dict:
     r = httpx.get(url, params=params, headers=HEADERS, timeout=60.0)
     print(f"DEBUG GET {path}: status={r.status_code}, len={len(r.content)}, text[:200]={r.text[:200]!r}", file=sys.stderr)
     print(f"  Full URL: {r.url}", file=sys.stderr)
-    print(f"  Request headers sent: {dict(r.request.headers)}", file=sys.stderr)
     if r.status_code >= 400:
         print(f"GET {path} -> {r.status_code}: {r.text}", file=sys.stderr)
     r.raise_for_status()

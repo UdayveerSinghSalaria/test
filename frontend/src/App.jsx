@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { Home, Bot, FolderKanban, CheckSquare, Activity as Act, CalendarDays, Zap, BarChart3, Settings as Cog, Puzzle, Search, Bell, Menu, X, ChevronDown, Loader2 } from 'lucide-react';
+import { Home, Bot, FolderKanban, CheckSquare, Activity as Act, CalendarDays, Zap, BarChart3, Settings as Cog, Puzzle, Search, Bell, Menu, X, ChevronDown, Loader2, Mail } from 'lucide-react';
 import { useApp } from './store.jsx';
 import * as P from './pages.jsx';
+import MailPage from './MailPage.jsx';
 
 export default function App() {
   const { proposals, settings, loading, authRequired, error } = useApp();
@@ -14,7 +15,7 @@ export default function App() {
   const pend = proposals.filter(p => p.status === 'pending').length;
   useEffect(() => { setOpen(false); window.scrollTo(0, 0) }, [loc.pathname]);
 
-  const main = [['/', 'Overview', Home], ['/agent', 'Agent Studio', Bot], ['/space', 'My Space', FolderKanban], ['/approvals', 'Approvals', CheckSquare], ['/activity', 'Activity', Act]];
+  const main = [['/', 'Overview', Home], ['/agent', 'Agent Studio', Bot], ['/space', 'My Space', FolderKanban], ['/mail', 'Mail', Mail], ['/approvals', 'Approvals', CheckSquare], ['/activity', 'Activity', Act]];
   const tools = [['/calendar', 'Calendar View', CalendarDays], ['/quick-actions', 'Quick Actions', Zap], ['/analytics', 'Analytics', BarChart3]];
   const foot = [['/settings', 'Settings', Cog], ['/extension', 'Get Extension', Puzzle]];
 
@@ -100,6 +101,7 @@ export default function App() {
             <Route path="/" element={<P.Overview />} />
             <Route path="/agent" element={<P.Agent />} />
             <Route path="/space" element={<P.Space />} />
+            <Route path="/mail" element={<MailPage />} />
             <Route path="/approvals" element={<P.Approvals />} />
             <Route path="/activity" element={<P.ActivityPage />} />
             <Route path="/calendar" element={<P.CalendarPage />} />

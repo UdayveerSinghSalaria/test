@@ -18,7 +18,6 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import get_settings
 from ..models import Activity, ActivityKind, Approval, ApprovalStatus, Task, TaskPriority, TaskStatus
 from ..services.activepieces_service import ActivepiecesError, get_activepieces_service
 from ..services.gmail_service import GmailError, GmailService
@@ -26,7 +25,6 @@ from ..services.google_oauth import OAuthError
 from ..services.token_service import TokenService
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 # Actions that MUST go through human approval before executing.
 SENSITIVE_ACTIONS = {"create_task", "draft_email", "send_email", "create_calendar_event"}
@@ -71,9 +69,7 @@ def log_activity(
 
 
 def _provider_for(ctx: ToolContext) -> str:
-    """Determine mail provider: activepieces > google > none."""
-    if settings.activepieces_api_key and settings.activepieces_search_flow_id:
-        return "activepieces"
+    """Mail access is always scoped to the signed-in user's Google account."""
     if ctx.token_provider is not None:
         return "google"
     return "none"
@@ -84,7 +80,7 @@ def _provider_for(ctx: ToolContext) -> str:
 # ---------------------------------------------------------------------------
 async def _require_token(ctx: ToolContext) -> str:
     if ctx.token_provider is None:
-        raise OAuthError("No mail provider connected. Connect Google or enable Activepieces.")
+        raise OAuthError("Gmail is not connected. Connect your Google account first.")
     return await ctx.token_provider()
 
 
@@ -140,7 +136,7 @@ async def search_emails(ctx: ToolContext, *, query: str, max_results: int = 10) 
             "count": len(results),
         }
     
-    raise OAuthError("No mail provider configured. Connect Google or enable Activepieces.")
+    raise OAuthError("Gmail is not connected. Connect your Google account first.")
 
 
 async def fetch_email(ctx: ToolContext, *, email_id: str) -> dict:
@@ -190,7 +186,7 @@ async def fetch_email(ctx: ToolContext, *, email_id: str) -> dict:
             "attachments": detail.attachments,
         }
     
-    raise OAuthError("No mail provider configured. Connect Google or enable Activepieces.")
+    raise OAuthError("Gmail is not connected. Connect your Google account first.")
 
 
 async def search_emails(ctx: ToolContext, *, query: str, max_results: int = 10) -> dict:

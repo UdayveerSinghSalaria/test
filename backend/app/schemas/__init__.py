@@ -38,6 +38,12 @@ class IntegrationOut(BaseModel):
     status: str = "connected"  # connected | error
 
 
+class SharedMailboxOut(BaseModel):
+    provider: str
+    mailbox: str
+    can_send: bool = False
+
+
 # --- Emails -----------------------------------------------------------------
 class EmailAddress(BaseModel):
     name: str = ""
@@ -58,6 +64,17 @@ class EmailSummary(BaseModel):
 class EmailListResponse(BaseModel):
     emails: list[EmailSummary]
     next_page_token: str | None = None
+
+
+class EmailSendRequest(BaseModel):
+    to: EmailStr
+    subject: str = Field(default="", max_length=998, pattern=r"^[^\r\n]*$")
+    body: str = Field(min_length=1, max_length=100_000)
+
+
+class EmailSentResponse(BaseModel):
+    id: str
+    thread_id: str = ""
 
 
 class EmailDetail(EmailSummary):

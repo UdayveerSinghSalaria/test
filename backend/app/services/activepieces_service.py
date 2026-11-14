@@ -5,12 +5,16 @@ Uses pre-configured flows (IDs from .env). No provisioning logic at runtime.
 from __future__ import annotations
 
 import json
+import re
 import httpx
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime
+from email.utils import getaddresses, parseaddr
+from html import unescape
 
 from app.config import get_settings
-from app.services.gmail_service import sanitize_html, EmailSummary, EmailDetail
+from app.schemas import EmailAddress, EmailDetail, EmailSummary
+from app.services.gmail_service import sanitize_html
 
 settings = get_settings()
 
@@ -80,9 +84,7 @@ class ActivepiecesService:
         
         # Expected shape: {"found": bool, "results": {"messages": [...], "count": int}}
         # Each message has: id, subject, from, to, date, text, html, attachments
-        found = data.get("found", False)
-        messages = data.get("results", {}).get("messages", []) if found else []
-        
+        messages = self._extract_messages(data)
         return [self._to_summary(m) for m in messages]
 
     def search(
@@ -104,9 +106,7 @@ class ActivepiecesService:
             filters["label"] = label
         
         data = self._call_sync(self.search_flow_id, filters)
-        found = data.get("found", False)
-        messages = data.get("results", {}).get("messages", []) if found else []
-        
+        messages = self._extract_messages(data)
         return [self._to_summary(m) for m in messages]
 
     def get_detail(self, user_id: int, message_id: str) -> EmailDetail:
@@ -146,102 +146,109 @@ class ActivepiecesService:
                 filters["label"] = part[6:]
             elif part.startswith("category:"):
                 filters["category"] = part[9:]
+            elif part.startswith("in:") and part[3:].lower() == "inbox":
+                filters["label"] = "INBOX"
+            elif part.startswith("content:"):
+                filters["content"] = part[8:].strip('"')
             elif " " not in part and "@" in part:
                 # bare email -> treat as from
                 filters["from"] = part
+            elif not part.startswith(("is:", "in:")):
+                filters.setdefault("content", "")
+                filters["content"] = f"{filters['content']} {part.strip(chr(34))}".strip()
         
         return filters
 
     def _to_summary(self, m: dict) -> EmailSummary:
         """Map Activepieces message to EmailSummary."""
         # m shape: {id, subject, from: {text, value}, to: {text, value}, date, text, html, attachments, messageId}
-        from_text = ""
-        if isinstance(m.get("from"), dict):
-            from_text = m["from"].get("text", "")
-        elif isinstance(m.get("from"), str):
-            from_text = m["from"]
-        
-        to_text = ""
-        if isinstance(m.get("to"), dict):
-            to_text = m["to"].get("text", "")
-        elif isinstance(m.get("to"), str):
-            to_text = m["to"]
-        
-        date_str = m.get("date", "")
-        try:
-            # Activepieces returns ISO string
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            date_iso = dt.isoformat()
-        except Exception:
-            date_iso = datetime.utcnow().isoformat()
-        
-        snippet = m.get("text", "") or m.get("html", "") or ""
-        snippet = sanitize_html(snippet)[:200]
+        sender_name, sender_email = self._sender(m.get("from"))
+        received_at = self._date(m.get("date"))
+        snippet = self._snippet(m.get("text") or m.get("html") or "")
         
         return EmailSummary(
             id=m.get("id", ""),
             thread_id=m.get("threadId", m.get("id", "")),
+            sender_name=sender_name,
+            sender_email=sender_email,
             subject=m.get("subject", "(no subject)"),
-            from_email=from_text,
-            to_email=to_text,
-            date=date_iso,
             snippet=snippet,
-            is_unread=True,  # Activepieces search doesn't return label info
-            labels=[],
+            received_at=received_at,
+            is_unread=False,
         )
 
     def _to_detail(self, m: dict) -> EmailDetail:
         """Map Activepieces message to EmailDetail."""
-        from_text = ""
-        from_value = []
-        if isinstance(m.get("from"), dict):
-            from_text = m["from"].get("text", "")
-            val = m["from"].get("value", [])
-            if isinstance(val, list):
-                from_value = val
-        elif isinstance(m.get("from"), str):
-            from_text = m["from"]
-        
-        to_text = ""
-        to_value = []
-        if isinstance(m.get("to"), dict):
-            to_text = m["to"].get("text", "")
-            val = m["to"].get("value", [])
-            if isinstance(val, list):
-                to_value = val
-        elif isinstance(m.get("to"), str):
-            to_text = m["to"]
-        
-        date_str = m.get("date", "")
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            date_iso = dt.isoformat()
-        except Exception:
-            date_iso = datetime.utcnow().isoformat()
-        
-        attachments = []
-        for att in m.get("attachments", []):
-            if isinstance(att, dict):
-                attachments.append({
-                    "id": att.get("fileName", ""),
-                    "filename": att.get("fileName", "attachment"),
-                    "mime_type": att.get("mimeType", "application/octet-stream"),
-                    "size": att.get("size", 0),
-                })
-        
+        summary = self._to_summary(m)
+        attachments = [
+            item.get("fileName", "attachment") if isinstance(item, dict) else str(item)
+            for item in m.get("attachments", [])
+        ]
         return EmailDetail(
-            id=m.get("id", ""),
-            thread_id=m.get("threadId", m.get("id", "")),
-            subject=m.get("subject", "(no subject)"),
-            from_email=from_text,
-            to_email=to_text,
-            date=date_iso,
-            body_text=m.get("text", ""),
-            body_html=sanitize_html(m.get("html", "")),
+            **summary.model_dump(),
+            to=self._addresses(m.get("to")),
+            body_text=str(m.get("text") or ""),
+            body_html_sanitized=sanitize_html(str(m.get("html") or "")),
             attachments=attachments,
-            message_id=m.get("messageId", m.get("id", "")),
-            labels=[],
         )
+
+    @staticmethod
+    def _sender(value) -> tuple[str, str]:
+        if isinstance(value, dict):
+            text = value.get("text", "")
+            if text:
+                value = text
+            else:
+                addresses = ActivepiecesService._addresses(value)
+                if addresses:
+                    return addresses[0].name or addresses[0].address, addresses[0].address
+                value = ""
+        name, address = parseaddr(str(value or ""))
+        return name or address, address
+
+    @staticmethod
+    def _addresses(value) -> list[EmailAddress]:
+        if isinstance(value, dict):
+            value = value.get("value") or value.get("text", "")
+        if isinstance(value, list):
+            pairs = [
+                (
+                    str(item.get("name", "")),
+                    str(item.get("address") or item.get("email") or ""),
+                )
+                for item in value
+                if isinstance(item, dict)
+            ]
+        else:
+            pairs = getaddresses([str(value or "")])
+        return [EmailAddress(name=name, address=address) for name, address in pairs if address]
+
+    @staticmethod
+    def _date(value) -> datetime | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _snippet(value: str) -> str:
+        safe_html = sanitize_html(str(value))
+        return unescape(re.sub(r"<[^>]+>", " ", safe_html))[:200].strip()
+
+    @staticmethod
+    def _extract_messages(data: dict) -> list[dict]:
+        if data.get("found") is False:
+            return []
+        results = data.get("results", data)
+        if isinstance(results, list):
+            return [item for item in results if isinstance(item, dict)]
+        if isinstance(results, dict):
+            messages = results.get("messages", [])
+            if isinstance(messages, list):
+                return [item for item in messages if isinstance(item, dict)]
+        return []
 
 
 # Singleton

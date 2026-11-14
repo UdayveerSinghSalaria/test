@@ -16,6 +16,7 @@ import base64
 import logging
 import re
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from email.header import decode_header, make_header
 from html import unescape
 from html.parser import HTMLParser
@@ -312,6 +313,19 @@ class GmailService:
             label_ids=data.get("labelIds", []),
             attachments=[a for a in attachment_names if a][:20],
         )
+
+    async def send(
+        self, token: str, *, sender: str, recipient: str, subject: str, body: str
+    ) -> dict[str, str]:
+        """Send a plain-text message through the authenticated user's Gmail."""
+        message = EmailMessage()
+        if sender:
+            message["From"] = sender
+        message["To"] = recipient
+        message["Subject"] = subject
+        message.set_content(body)
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+        return await self._request("POST", "/messages/send", token, json={"raw": raw})
 
     async def _bodies_from_parts(self, token: str, data: dict) -> tuple[str, str]:
         """Decode nested message parts using the Gmail payload tree."""

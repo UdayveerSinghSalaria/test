@@ -44,23 +44,23 @@ export const api = {
   // Activity
   getActivity: () => apiRequest('/activity'),
 
-  // Emails (Activepieces)
+  // User's connected Gmail
   getEmails: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return apiRequest(`/emails?${qs}`);
   },
   getEmail: (id) => apiRequest(`/emails/${id}`),
+  sendEmail: (message) => apiRequest('/emails/send', { method: 'POST', body: JSON.stringify(message) }),
 
   // Settings
   getSettings: () => apiRequest('/auth/me'),
   saveSettings: (settings) => apiRequest('/auth/me', { method: 'PATCH', body: JSON.stringify(settings) }),
 
-  // Activepieces status
-  getActivepiecesStatus: () => apiRequest('/integrations/activepieces/status'),
-
   // Integrations
+  googleConnectUrl: () => `${API_BASE}/integrations/google/connect`,
   getGoogleStatus: () => apiRequest('/integrations/google/status'),
   disconnectGoogle: () => apiRequest('/integrations/google', { method: 'DELETE' }),
+  getActivepiecesStatus: () => apiRequest('/integrations/activepieces/status'),
 };
 
 export default api;

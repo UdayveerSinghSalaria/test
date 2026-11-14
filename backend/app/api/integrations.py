@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..database import get_db
 from ..models import User
-from ..schemas import IntegrationOut
+from ..schemas import IntegrationOut, SharedMailboxOut
+from ..services.activepieces_service import get_activepieces_service
 from ..security.sessions import COOKIE_NAME
 from ..services.google_oauth import STATE_COOKIE, STATE_MAX_AGE, GoogleOAuthService, OAuthError
 from ..services.token_service import TokenService
@@ -77,7 +78,7 @@ async def google_callback(
     saved_state = request.cookies.get(STATE_COOKIE)
 
     def fail(message: str) -> RedirectResponse:
-        r = RedirectResponse(f"{frontend}/integrations?status=error", status_code=302)
+        r = RedirectResponse(f"{frontend}/mail?status=error", status_code=302)
         r.delete_cookie(STATE_COOKIE, path="/")
         # Message travels in a flash cookie (short, non-sensitive) for the UI.
         r.set_cookie(
@@ -129,7 +130,7 @@ async def google_callback(
     )
     logger.info("Gmail connected for user %s (%s)", app_user.id, provider_email or "email hidden")
 
-    r = RedirectResponse(f"{frontend}/integrations?status=connected", status_code=302)
+    r = RedirectResponse(f"{frontend}/mail?status=connected", status_code=302)
     r.delete_cookie(STATE_COOKIE, path="/")
     return r
 
@@ -169,20 +170,17 @@ async def google_disconnect(
 
 
 # ---------------------------------------------------------------------------
-# Activepieces status (read-only; global/shared configuration)
+# Activepieces status (one shared mailbox visible to signed-in users)
 # ---------------------------------------------------------------------------
-@router.get("/activepieces/status", response_model=IntegrationOut | None)
+@router.get("/activepieces/status", response_model=SharedMailboxOut | None)
 async def activepieces_status(
     user: User = Depends(get_session_user),
 ):
-    """Check if Activepieces mail is configured globally."""
-    settings = get_settings()
-    if not (settings.activepieces_api_key and settings.activepieces_search_flow_id):
+    """Report the shared Activepieces mailbox without exposing its account address."""
+    if not get_activepieces_service().is_configured:
         return None
-    return IntegrationOut(
+    return SharedMailboxOut(
         provider="activepieces",
-        provider_email="shared teammate mailbox (relan.toshan@gmail.com)",
-        scopes=["gmail.readonly"],
-        connected_at=None,
-        token_expiry=None,
+        mailbox="Shared teammate mailbox",
+        can_send=False,
     )

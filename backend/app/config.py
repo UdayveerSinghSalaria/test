@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="AI Work Assistant")
     app_env: str = Field(default="development")
     backend_url: str = Field(default="http://localhost:8000")
-    frontend_url: str = Field(default="http://localhost:3000")
+    frontend_url: str = Field(default="http://localhost:5174")
 
     # --- Database -----------------------------------------------------------
     database_url: str = Field(default=f"sqlite:///{BACKEND_DIR / 'assistant.db'}")
@@ -35,7 +35,9 @@ class Settings(BaseSettings):
     # --- Security (required) ------------------------------------------------
     session_secret: str = Field(default="")
     credentials_encryption_key: str = Field(default="")
-    cors_origins: str = Field(default="http://localhost:3000")
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:5174"
+    )
     session_max_age: int = Field(default=60 * 60 * 24 * 7)  # 7 days
 
     # --- Google OAuth -------------------------------------------------------
@@ -48,7 +50,8 @@ class Settings(BaseSettings):
     google_token_uri: str = "https://oauth2.googleapis.com/token"
     google_userinfo_uri: str = "https://openidconnect.googleapis.com/v1/userinfo"
     gmail_scopes: str = (
-        "openid email profile https://www.googleapis.com/auth/gmail.readonly"
+        "openid email profile https://www.googleapis.com/auth/gmail.readonly "
+        "https://www.googleapis.com/auth/gmail.send"
     )
 
     # --- LLM (optional; agent features disabled when unset) ------------------
@@ -57,7 +60,7 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="")
     llm_api_key: str = Field(default="")
 
-    # --- Activepieces (optional; mail fallback when Google unavailable) ------
+    # --- Legacy Activepieces settings (not used for individual user mail) ---
     activepieces_base_url: str = Field(default="https://cloud.activepieces.com/api/v1")
     activepieces_api_key: str = Field(default="")
     activepieces_project_id: str = Field(default="")

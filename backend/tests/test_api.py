@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timedelta
+from email import message_from_bytes
+from email.policy import default
 
 import httpx
 import pytest
@@ -18,6 +20,8 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.security.encryption import decrypt, encrypt
 from app.security.sessions import create_session_token, read_session_token
+from app.schemas import EmailDetail, EmailSummary
+from app.services.activepieces_service import ActivepiecesService
 from app.services.gmail_service import GmailService, sanitize_html
 from app.services.google_oauth import GoogleOAuthService, OAuthError
 
@@ -212,6 +216,79 @@ def test_gmail_list_maps_summaries():
     assert emails[0].sender_email == "bob@x.com"
 
 
+def test_gmail_send_builds_and_posts_plain_text_message():
+    captured = {}
+
+    class StubTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["body"] = request.read()
+            return httpx.Response(200, json={"id": "sent-id", "threadId": "thread-id"})
+
+    svc = GmailService(client=httpx.AsyncClient(transport=StubTransport()))
+    import asyncio
+
+    result = asyncio.run(
+        svc.send(
+            "token",
+            sender="owner@example.com",
+            recipient="recipient@example.com",
+            subject="Hello",
+            body="Message body",
+        )
+    )
+
+    assert captured["url"].endswith("/messages/send")
+    raw = httpx.Response(200, content=captured["body"]).json()["raw"]
+    decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    message = message_from_bytes(decoded, policy=default)
+    assert message["From"] == "owner@example.com"
+    assert message["To"] == "recipient@example.com"
+    assert message["Subject"] == "Hello"
+    assert message.get_content().strip() == "Message body"
+    assert result["id"] == "sent-id"
+
+
+def test_activepieces_mail_maps_messages_and_search_filters():
+    svc = ActivepiecesService()
+    summary = svc._to_summary(
+        {
+            "id": "shared-id",
+            "subject": "Teammate update",
+            "from": {"text": "Teammate <teammate@example.com>"},
+            "date": "2026-11-14T01:00:00Z",
+            "text": "<p>Message preview</p>",
+        }
+    )
+    detail = svc._to_detail(
+        {
+            "id": "shared-id",
+            "subject": "Teammate update",
+            "from": {"text": "Teammate <teammate@example.com>"},
+            "to": {"value": [{"name": "Recipient", "email": "recipient@example.com"}]},
+            "date": "2026-11-14T01:00:00Z",
+            "text": "Full message",
+            "html": "<p>Safe content</p><script>unsafe()</script>",
+            "attachments": [{"fileName": "report.pdf"}],
+        }
+    )
+
+    assert isinstance(summary, EmailSummary)
+    assert summary.sender_name == "Teammate"
+    assert summary.sender_email == "teammate@example.com"
+    assert summary.snippet == "Message preview"
+    assert isinstance(detail, EmailDetail)
+    assert detail.to[0].address == "recipient@example.com"
+    assert detail.body_text == "Full message"
+    assert "script" not in detail.body_html_sanitized
+    assert detail.attachments == ["report.pdf"]
+    assert svc._parse_query('in:inbox from:"a@example.com" invoice') == {
+        "label": "INBOX",
+        "from": "a@example.com",
+        "content": "invoice",
+    }
+
+
 def test_gmail_auth_error_maps_to_friendly():
     class StubTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -237,6 +314,7 @@ def test_authorize_url_contains_required_params():
     url = svc.build_authorize_url("state123")
     assert "accounts.google.com" in url
     assert "gmail.readonly" in url
+    assert "gmail.send" in url
     assert "access_type=offline" in url
     assert "state=state123" in url
     assert "client_secret" not in url, "secret must never appear in URLs"
@@ -348,12 +426,63 @@ def test_endpoints_require_auth(client: TestClient):
     for path in ("/api/emails", "/api/tasks", "/api/activity", "/api/approvals",
                  "/api/integrations/google/status"):
         assert client.get(path).status_code == 401, path
+    assert client.post(
+        "/api/emails/send",
+        json={"to": "recipient@example.com", "subject": "Hello", "body": "Message"},
+    ).status_code == 401
 
 
 def test_emails_409_when_gmail_not_connected(auth_client: TestClient):
     r = auth_client.get("/api/emails")
     assert r.status_code == 409
-    assert "not configured" in r.json()["detail"].lower() or "no mail provider" in r.json()["detail"].lower()
+    assert "no mail provider" in r.json()["detail"].lower()
+    send = auth_client.post(
+        "/api/emails/send",
+        json={"to": "recipient@example.com", "subject": "Hello", "body": "Message"},
+    )
+    assert send.status_code == 409
+
+
+def test_shared_activepieces_mail_is_used_when_configured(
+    auth_client: TestClient, monkeypatch
+):
+    class StubActivepieces:
+        is_configured = True
+
+        def search(self, user_id, q, max_results):
+            assert q == "subject:invoice"
+            return [
+                EmailSummary(
+                    id="shared-id",
+                    sender_name="Teammate",
+                    sender_email="teammate@example.com",
+                    subject="Invoice",
+                )
+            ]
+
+        def get_detail(self, user_id, message_id):
+            assert message_id == "shared-id"
+            return EmailDetail(
+                id=message_id,
+                subject="Invoice",
+                body_text="Shared mailbox message",
+            )
+
+    monkeypatch.setattr(
+        "app.api.emails.get_activepieces_service", lambda: StubActivepieces()
+    )
+    response = auth_client.get("/api/emails", params={"q": "subject:invoice"})
+    assert response.status_code == 200
+    assert response.json()["emails"][0]["sender_email"] == "teammate@example.com"
+    detail = auth_client.get("/api/emails/shared-id")
+    assert detail.status_code == 200
+    assert detail.json()["body_text"] == "Shared mailbox message"
+    send = auth_client.post(
+        "/api/emails/send",
+        json={"to": "recipient@example.com", "subject": "Hello", "body": "Message"},
+    )
+    assert send.status_code == 409
+    assert "shared" in send.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

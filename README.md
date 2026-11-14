@@ -21,14 +21,15 @@ SQLite for local dev)
 |---|---|---|
 | Email/password auth | ✅ Live | argon2 hashes, httpOnly signed session cookie |
 | Google OAuth 2.0 | ✅ Live* | full Authorization Code Flow, state CSRF, encrypted tokens |
-| Gmail read (latest 5, search, detail, load-more) | ✅ Live* | real Gmail API, multipart decoding, sanitized HTML |
+| Gmail inbox (per-user, search, detail, load-more) | ✅ Live* | real Gmail API, multipart decoding, sanitized text |
+| Gmail send | ✅ Live* | explicit plain-text compose action; Gmail send permission |
 | Disconnect | ✅ Live* | deletes stored credentials |
 | Tasks (CRUD, user-scoped) | ✅ Live | |
 | Approvals (human-in-the-loop gate) | ✅ Live | agent `create_task` blocks until approved |
 | Activity audit log | ✅ Live | tool calls/plans/approvals; **never email bodies** |
 | AI Assistant (LangGraph loop) | ✅ Live* | streamed plan → tools → answer; needs `LLM_*` env |
 | Calendar | 🚧 Placeholder | intentionally labeled "Not implemented" |
-| Gmail send / draft | ❌ Not requested | readonly scope only, per spec |
+| Gmail drafts | ❌ Not implemented | |
 | Google Calendar API | ❌ Prepared, not wired | |
 
 \* requires environment credentials — see [Configuration](#configuration).
@@ -92,7 +93,7 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-32 tests cover: session/crypto primitives, HTML sanitization, multipart email
+Tests cover: session/crypto primitives, HTML sanitization, multipart email
 decoding, OAuth state CSRF + code exchange, encrypted-at-rest storage, auth
 endpoints, task CRUD, **user-level data isolation**, and the approval gate.
 
@@ -109,59 +110,44 @@ security-critical variable is missing or invalid — it never silently degrades.
 | `SESSION_SECRET` | ✅ | signs session cookies |
 | `CREDENTIALS_ENCRYPTION_KEY` | ✅ | Fernet key; OAuth tokens encrypted at rest |
 | `DATABASE_URL` | optional | defaults to local SQLite; use your Supabase Postgres URL in deploy |
-| `CORS_ORIGINS` | optional | defaults to `http://localhost:3000` |
+| `CORS_ORIGINS` | optional | defaults to local Vite origins |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Gmail | OAuth client from Google Cloud Console |
 | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | for agent | any OpenAI-compatible endpoint or Anthropic |
-| `ACTIVEPIECES_API_KEY` | optional | mail fallback via teammate's Activepieces |
-| `ACTIVEPIECES_PROJECT_ID` | optional | project containing Gmail connection |
-| `ACTIVEPIECES_GMAIL_CONNECTION_ID` | optional | connection externalId from teammate's project |
-| `ACTIVEPIECES_SEARCH_FLOW_ID` | optional | "App Mail Search" flow ID (provisioned) |
-| `ACTIVEPIECES_GET_FLOW_ID` | optional | "App Mail Get" flow ID (provisioned) |
+| `ACTIVEPIECES_API_KEY`, `ACTIVEPIECES_SEARCH_FLOW_ID`, `ACTIVEPIECES_GET_FLOW_ID` | for shared mail | Flow API key and Search/Get flow IDs; all signed-in users share the same read-only mailbox |
 
 ### Google Cloud setup (the one manual step)
 
 1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
 2. Create project → enable the **Gmail API**.
-3. Configure the OAuth consent screen (External + test users is fine).
-4. Create an **OAuth 2.0 Client ID** (Web application) with authorized redirect URI:
-   `http://localhost:8000/api/integrations/google/callback`
-5. Put the client id/secret into `backend/.env`.
+3. Configure the OAuth consent screen and add users as test users while the app
+   is in testing.
+4. Create an **OAuth 2.0 Client ID** (Web application) with authorized
+   redirect URIs:
+   - Local: `http://localhost:8000/api/integrations/google/callback`
+   - Production: `https://testudayrepo.netlify.app/api/integrations/google/callback`
 
-Requested scopes (nothing more): `openid`, `email`, `profile`,
-`https://www.googleapis.com/auth/gmail.readonly` — **no send/write scope is
-requested in this milestone.**
+   In production, the callback must use the Netlify domain so the browser sends
+   the same-site session and OAuth state cookies through the API proxy.
+5. Put the client id/secret into `backend/.env` locally and the Render
+   environment variables in production.
 
-### Activepieces mail fallback (no Google Cloud needed)
+Requested scopes: `openid`, `email`, `profile`,
+`https://www.googleapis.com/auth/gmail.readonly`, and
+`https://www.googleapis.com/auth/gmail.send`. Users must connect their own
+Google account from **Mail** and approve both Gmail permissions. Google may
+require the OAuth app to be configured/verified for these sensitive scopes;
+for an app in testing, only listed test users can connect. Previously connected
+users need to reconnect to grant send access.
 
-If Google Cloud credentials are unavailable, you can use a teammate's
-Activepieces instance with a shared Gmail connection. The teammate provisions
-two flows once; you just add the flow IDs and API key to `backend/.env`.
+The Activepieces integration uses one teammate's shared mailbox. When its
+three runtime variables are configured, all signed-in users can read and
+search that same mailbox. The existing Search/Get flows do not send email.
 
-1. Teammate runs the provisioning script (creates flows in their project):
-   ```powershell
-   cd backend
-   .\.venv\Scripts\python.exe scripts/provision_activepieces.py
-   ```
-   This prints `ACTIVEPIECES_SEARCH_FLOW_ID` and `ACTIVEPIECES_GET_FLOW_ID`.
-
-2. Add to your `backend/.env`:
-   ```
-   ACTIVEPIECES_API_KEY=<teammate's project-scoped key>
-   ACTIVEPIECES_PROJECT_ID=<teammate's project ID>
-   ACTIVEPIECES_GMAIL_CONNECTION_ID=<Gmail connection externalId>
-   ACTIVEPIECES_SEARCH_FLOW_ID=<from step 1>
-   ACTIVEPIECES_GET_FLOW_ID=<from step 1>
-   ```
-
-3. Restart the backend. The app will now:
-   - Prefer Activepieces if configured (no per-user OAuth).
-   - Fall back to Google OAuth if Activepieces is not set.
-   - Return honest `409` if neither is available.
-
-**Honest labeling:** The Integrations page shows "Activepieces (shared teammate
-mailbox)" with the account email. The webhook URLs are unguessable but
-unauthenticated — only the API key is secret. Free-plan credit exhaustion
-surfaces as `402 PAYMENT_REQUIRED`. The teammate can revoke the key at any time.
+To configure it in Render, set `ACTIVEPIECES_API_KEY`,
+`ACTIVEPIECES_SEARCH_FLOW_ID`, and `ACTIVEPIECES_GET_FLOW_ID`. The backend
+uses the project API key and flow IDs; a standalone webhook URL by itself is
+not what these settings expect. The Search/Get flow IDs are available from the
+teammate's Activepieces project. Keep the API key private.
 
 ### Supabase / PostgreSQL
 
@@ -192,7 +178,6 @@ backend/  FastAPI
   services/      google_oauth (state, exchange, refresh) · gmail_service
                   (list/search/detail, multipart decode, HTML sanitization)
                   token_service (encrypt, auto-refresh, disconnect)
-                  activepieces_service (sync webhook calls; no provisioning at runtime)
   agents/        planner (structured ExecutionPlan) · orchestrator (LangGraph
                   plan→act→summarize with approval gate) · tools (registry;
                   unknown tools refused) · llm (configurable provider)
@@ -226,6 +211,6 @@ cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8
 cd frontend; npm run dev
 ```
 
-Open http://localhost:3000 → create an account → **Integrations → Connect
-Gmail** → Google consent screen → back → **Inbox** shows your 5 latest real
-emails.
+Open the Vite URL (usually http://localhost:5173 or http://localhost:5174),
+create an account, then open **Mail → Connect Google account**. After Google
+consent, your own Gmail inbox appears in SaarthiFlow.

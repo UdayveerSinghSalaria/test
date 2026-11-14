@@ -23,3 +23,15 @@ services:
         generateValue: true
       - key: CREDENTIALS_ENCRYPTION_KEY
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://testudayrepo.netlify.app/api/integrations/google/callback
+      - key: ACTIVEPIECES_API_KEY
+        sync: false
+      - key: ACTIVEPIECES_SEARCH_FLOW_ID
+        sync: false
+      - key: ACTIVEPIECES_GET_FLOW_ID
+        sync: false
