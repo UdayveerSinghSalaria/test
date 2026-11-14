@@ -8,7 +8,7 @@ import json
 import re
 import httpx
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import getaddresses, parseaddr
 from html import unescape
 
@@ -35,6 +35,8 @@ class ActivepiecesService:
         self.api_key = settings.activepieces_api_key
         self.search_flow_id = settings.activepieces_search_flow_id
         self.get_flow_id = settings.activepieces_get_flow_id
+        self.send_flow_id = settings.activepieces_send_flow_id
+        self.allowed_user_email = settings.activepieces_allowed_user_email.strip()
 
     @property
     def is_configured(self) -> bool:
@@ -43,6 +45,16 @@ class ActivepiecesService:
             self.search_flow_id,
             self.get_flow_id,
         ])
+
+    @property
+    def can_send(self) -> bool:
+        return self.is_configured and bool(self.send_flow_id)
+
+    def is_allowed_user(self, email: str) -> bool:
+        return bool(
+            self.allowed_user_email
+            and email.strip().casefold() == self.allowed_user_email.casefold()
+        )
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -120,6 +132,27 @@ class ActivepiecesService:
         # Expected shape: {id, subject, from, to, cc, date, text, html, attachments, messageId, ...}
         return self._to_detail(data)
 
+    def send(self, recipient: str, subject: str, body: str) -> dict[str, str]:
+        """Send an email through the configured Activepieces send flow.
+
+        The flow accepts {to, subject, body} and must return an `id` or
+        `messageId` field from the sent Gmail message.
+        """
+        if not self.can_send:
+            raise ActivepiecesError("Activepieces send flow is not configured", 409)
+
+        data = self._call_sync(
+            self.send_flow_id,
+            {"to": recipient, "subject": subject, "body": body},
+        )
+        message_id = data.get("id") or data.get("messageId") or data.get("message_id")
+        if not isinstance(message_id, str) or not message_id:
+            raise ActivepiecesError(
+                "Activepieces send flow did not confirm the sent message", 502
+            )
+        thread_id = data.get("threadId") or data.get("thread_id") or ""
+        return {"id": message_id, "thread_id": str(thread_id)}
+
     # ---- Internal helpers ----------------------------------------------------
 
     def _parse_query(self, q: str) -> dict:
@@ -140,6 +173,14 @@ class ActivepiecesService:
                 filters["after_date"] = part[6:]
             elif part.startswith("before:"):
                 filters["before_date"] = part[7:]
+            elif part.startswith("newer_than:"):
+                period = re.fullmatch(r"newer_than:(\d+)([dmy])", part)
+                if period:
+                    units = {"d": 1, "m": 30, "y": 365}
+                    days = int(period.group(1)) * units[period.group(2)]
+                    filters["after_date"] = (
+                        datetime.utcnow() - timedelta(days=days)
+                    ).date().isoformat()
             elif part == "has:attachment":
                 filters["has_attachment"] = True
             elif part.startswith("label:"):
@@ -148,6 +189,10 @@ class ActivepiecesService:
                 filters["category"] = part[9:]
             elif part.startswith("in:") and part[3:].lower() == "inbox":
                 filters["label"] = "INBOX"
+            elif part == "is:unread":
+                filters["label"] = "UNREAD"
+            elif part == "is:read":
+                filters["is_read"] = True
             elif part.startswith("content:"):
                 filters["content"] = part[8:].strip('"')
             elif " " not in part and "@" in part:

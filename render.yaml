@@ -29,9 +29,21 @@ services:
         sync: false
       - key: GOOGLE_REDIRECT_URI
         value: https://testudayrepo.netlify.app/api/integrations/google/callback
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
       - key: ACTIVEPIECES_API_KEY
         sync: false
       - key: ACTIVEPIECES_SEARCH_FLOW_ID
         sync: false
       - key: ACTIVEPIECES_GET_FLOW_ID
+        sync: false
+      - key: ACTIVEPIECES_SEND_FLOW_ID
+        sync: false
+      - key: ACTIVEPIECES_ALLOWED_USER_EMAIL
         sync: false

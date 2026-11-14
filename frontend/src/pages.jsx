@@ -1,7 +1,7 @@
 import React,{useState,useMemo,useEffect} from 'react';import {Link,useNavigate,useSearchParams} from 'react-router-dom';
 import {ClipboardList,CheckCircle2,CalendarClock,Sparkles,Paperclip,Globe,CalendarDays,ListChecks,Plus,ArrowUpRight,Trash2,Pencil,ChevronLeft,ChevronRight,Send,Check,X,Download,Chrome,Search,Trophy,Activity as ActI,BarChart3,Bot,Circle,Loader2,Zap,Shield,MousePointerClick} from 'lucide-react';
 import {ResponsiveContainer,BarChart,Bar,XAxis,YAxis,Tooltip,PieChart,Pie,Cell,AreaChart,Area,CartesianGrid,LineChart,Line} from 'recharts';
-import {useApp,fmtD,MONTHS,iso,TODAY,uid} from './store.jsx';import {Card,Title,Pri,Modal,Page,Empty,TaskModal} from './ui.jsx';
+import {useApp,fmtD,MONTHS,iso,TODAY} from './store.jsx';import {Card,Title,Pri,Modal,Page,Empty,TaskModal} from './ui.jsx';import api from './api.js';
 const COL=['#7c3aed','#b794f6','#f472b6','#e4d7ff'];
 const dow=d=>new Date(d+'T00:00:00').getDay();
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -37,28 +37,71 @@ return <div className="grid gap-5 xl:grid-cols-[1fr_320px]"><div className="min-
 <Card><Title icon={BarChart3} right={<span className="chip bg-emerald-100 text-emerald-600">+50%</span>}>Activity Summary</Title><div className="h-32"><ResponsiveContainer><AreaChart data={weekly(tasks).map(x=>({...x,n:x.n+1}))}><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#a78bfa" stopOpacity=".5"/><stop offset="1" stopColor="#a78bfa" stopOpacity="0"/></linearGradient></defs><Tooltip/><Area dataKey="n" stroke="#7c3aed" fill="url(#g)" strokeWidth={2} type="monotone"/></AreaChart></ResponsiveContainer></div></Card></div></div>}
 function Donut({data,total}){const d=data.length?data:[{name:'None',value:1}];return <div><div className="relative mx-auto h-36 w-36"><ResponsiveContainer><PieChart><Pie data={d} dataKey="value" innerRadius={44} outerRadius={64} paddingAngle={2} stroke="none">{d.map((_,i)=><Cell key={i} fill={COL[i%4]}/>)}</Pie></PieChart></ResponsiveContainer><div className="absolute inset-0 grid place-items-center text-center"><div><b className="text-2xl">{total}</b><div className="-mt-1 text-xs text-ink/60">Actions</div></div></div></div><div className="mt-2 space-y-1 text-xs">{data.map((x,i)=><div key={x.name} className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full" style={{background:COL[i%4]}}/>{x.name}<b className="ml-auto">{Math.round(x.value/total*100)}%</b></div>)}</div></div>}
 
-const STAGES=['Understand','Plan','Approve','Execute','Verify'];
-function makePlan(c){const l=c.toLowerCase();const mk=(title,priority,due,project)=>({id:uid(),title,priority,due,project});
-if(l.includes('week'))return[mk('Review all pending deadlines','High','2026-11-15','Planning'),mk('Block 2h deep-work for MVP','High','2026-11-16','Hackathon'),mk('Weekly retro and next-week plan','Low','2026-11-21','Planning')];
-if(l.includes('checklist'))return[mk('Finalize README and screenshots','Medium','2026-11-18','Hackathon'),mk('Record 2-minute demo video','High','2026-11-19','Hackathon'),mk('Submit project on portal','High','2026-11-20','Hackathon')];
-if(l.includes('overdue')||l.includes('reschedule'))return[mk('Reschedule overdue tasks to this week','Medium','2026-11-16','Planning'),mk('Clear one blocked task today','High','2026-11-15','Planning')];
-return[mk('Register for the event','High','2026-11-17','Hackathon'),mk('Note eligibility and requirements','Medium','2026-11-18','Hackathon'),mk('Draft idea and team roles','Medium','2026-11-21','Hackathon'),mk('Submit final entry before deadline','High','2026-11-28','Hackathon')]}
 export function Agent(){
-const{addProposal}=useApp();const[sp]=useSearchParams();const nav=useNavigate();
-const[cmd,setCmd]=useState(sp.get('cmd')||'');const[msgs,setMsgs]=useState([{r:'ai',t:'Hi! Give me a goal and I’ll draft a task plan for your approval. (Demo Mode: plans are simulated locally.)'}]);
-const[plan,setPlan]=useState(null);const[st,setSt]=useState(0);const[busy,setBusy]=useState(false);const[sent,setSent]=useState(false);
+const{refreshApprovals}=useApp();const[sp]=useSearchParams();
+const[cmd,setCmd]=useState(sp.get('cmd')||'');
+const[msgs,setMsgs]=useState([{r:'ai',t:'Ask me to search and read your email, draft a reply, or prepare an email to send. Sending always pauses for your approval.'}]);
+const[events,setEvents]=useState([]);
+const[approval,setApproval]=useState(null);
+const[busy,setBusy]=useState(false);
+const[approvalBusy,setApprovalBusy]=useState(false);
 useEffect(()=>{setCmd(sp.get('cmd')||'')},[sp]);
-const gen=()=>{if(!cmd.trim()||busy)return;const c=cmd;setBusy(true);setSent(false);setSt(0);setMsgs(m=>[...m,{r:'me',t:c}]);setCmd('');
-setTimeout(()=>{setSt(1);const p=makePlan(c);setPlan({title:c,tasks:p});setMsgs(m=>[...m,{r:'ai',t:`I drafted ${p.length} tasks. Edit them below, then send for approval.`}]);setBusy(false)},900)};
-const ed=(id,k,v)=>setPlan(p=>({...p,tasks:p.tasks.map(t=>t.id===id?{...t,[k]:v}:t)}));
-const send=()=>{addProposal({title:plan.title,source:'Agent Studio',tasks:plan.tasks});setSt(2);setSent(true);setMsgs(m=>[...m,{r:'ai',t:'Plan sent. Open Approvals to approve or reject it.'}])};
-return <Page title="Agent Studio" sub="Describe a goal and review the plan before anything happens." right={<span className="chip bg-amber-100 text-amber-700">Demo Mode · simulated AI</span>}>
-<Card className="!p-4"><div className="flex flex-wrap items-center justify-between gap-2">{STAGES.map((s,i)=><div key={s} className={'flex items-center gap-2 text-sm font-semibold '+(i<=st?'text-brand-700':'text-ink/40')}><span className={'grid h-7 w-7 place-items-center rounded-full text-xs '+(i<=st?'bg-brand-600 text-white':'bg-brand-50')}>{i<st?<Check size={14}/>:i+1}</span>{s}</div>)}</div></Card>
-<div className="grid gap-5 lg:grid-cols-2"><Card className="flex min-h-[420px] flex-col"><div className="flex-1 space-y-3 overflow-y-auto">{msgs.map((m,i)=><div key={i} className={'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm '+(m.r==='me'?'ml-auto bg-brand-600 text-white':'bg-white/90')}>{m.t}</div>)}{busy&&<div className="flex items-center gap-2 text-sm text-ink/60"><Loader2 className="animate-spin" size={16}/>Planning…</div>}</div>
-<div className="mt-3 flex flex-wrap gap-2">{['Analyze this hackathon page','Plan my week','Create a checklist for submission'].map(s=><button key={s} className="btn2 !px-3 !py-1 !text-xs" onClick={()=>setCmd(s)}>{s}</button>)}</div>
-<div className="mt-3 flex gap-2"><input className="inp" value={cmd} onChange={e=>setCmd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&gen()} placeholder="Tell the agent what to do…"/><button className="btn" onClick={gen} disabled={busy}><Sparkles size={16}/>Generate Plan</button></div></Card>
-<Card><Title icon={ListChecks}>Proposed tasks</Title>{!plan?<Empty text="Generate a plan to see editable tasks here."/>:<div className="space-y-3">{plan.tasks.map(t=><div key={t.id} className="space-y-2 rounded-2xl bg-white/70 p-3"><input className="inp font-semibold" value={t.title} onChange={e=>ed(t.id,'title',e.target.value)}/><div className="flex gap-2"><select className="inp" value={t.priority} onChange={e=>ed(t.id,'priority',e.target.value)}>{['High','Medium','Low'].map(x=><option key={x}>{x}</option>)}</select><input type="date" className="inp" value={t.due} onChange={e=>ed(t.id,'due',e.target.value)}/><button className="btn2 !px-3" aria-label="Remove" onClick={()=>setPlan(p=>({...p,tasks:p.tasks.filter(x=>x.id!==t.id)}))}><Trash2 size={16}/></button></div></div>)}
-{sent?<button className="btn w-full" onClick={()=>nav('/approvals')}>Go to Approvals <ArrowUpRight size={16}/></button>:<button className="btn w-full" disabled={!plan.tasks.length} onClick={send}><Send size={16}/>Send for Approval</button>}</div>}</Card></div></Page>}
+
+const run=async()=>{
+  const prompt=cmd.trim();
+  if(!prompt||busy)return;
+  setCmd('');
+  setBusy(true);
+  setApproval(null);
+  setMsgs(m=>[...m,{r:'me',t:prompt}]);
+  setEvents([]);
+  try{
+    await api.streamAssistant(prompt,event=>{
+      setEvents(items=>[...items,event]);
+      if(event.type==='answer')setMsgs(m=>[...m,{r:'ai',t:event.text}]);
+      if(event.type==='error')setMsgs(m=>[...m,{r:'ai',t:event.text}]);
+      if(event.type==='approval_required'){
+        let details={};
+        try{details=JSON.parse(event.detail||'{}')}catch{}
+        setApproval({id:event.approval_id,tool:event.tool,details});
+        refreshApprovals().catch(error=>setMsgs(m=>[...m,{r:'ai',t:error.message||'Could not refresh approvals.'}]));
+      }
+    });
+  }catch(error){
+    setMsgs(m=>[...m,{r:'ai',t:error.message||'The assistant request failed.'}]);
+  }finally{
+    setBusy(false);
+  }
+};
+
+const resolve=async approved=>{
+  if(!approval||approvalBusy)return;
+  setApprovalBusy(true);
+  try{
+    await api.decideApproval(approval.id,{approved});
+    setMsgs(m=>[...m,{r:'ai',t:approved?'The approved action completed.':'The action was rejected; nothing was changed.'}]);
+    setApproval(null);
+    refreshApprovals().catch(error=>setMsgs(m=>[...m,{r:'ai',t:error.message||'Could not refresh approvals.'}]));
+  }catch(error){
+    setMsgs(m=>[...m,{r:'ai',t:error.message||'The approval could not be completed.'}]);
+    if(approved){
+      setApproval(null);
+      refreshApprovals();
+    }
+  }finally{
+    setApprovalBusy(false);
+  }
+};
+
+return <Page title="Agent Studio" sub="Ask the configured AI to work with your connected mailbox." right={<span className="chip bg-emerald-100 text-emerald-700">Live Agent</span>}>
+<div className="grid gap-5 lg:grid-cols-2"><Card className="flex min-h-[420px] flex-col">
+<div className="flex-1 space-y-3 overflow-y-auto">{msgs.map((m,i)=><div key={i} className={'max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm '+(m.r==='me'?'ml-auto bg-brand-600 text-white':'bg-white/90')}>{m.t}</div>)}{busy&&<div className="flex items-center gap-2 text-sm text-ink/60"><Loader2 className="animate-spin" size={16}/>Working…</div>}</div>
+<div className="mt-3 flex flex-wrap gap-2">{['Summarize my latest unread emails','Draft a reply to my latest email','Search my inbox for an invoice'].map(s=><button key={s} className="btn2 !px-3 !py-1 !text-xs" onClick={()=>setCmd(s)}>{s}</button>)}</div>
+<div className="mt-3 flex gap-2"><input className="inp" value={cmd} onChange={e=>setCmd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder="Ask about your email…"/><button className="btn" onClick={run} disabled={busy||!cmd.trim()}><Sparkles size={16}/>Ask Agent</button></div>
+</Card>
+<Card><Title icon={ListChecks}>Run activity</Title>{!events.length?<Empty text="Agent steps will appear here when you send a request."/>:<div className="space-y-3">{events.map((event,i)=><div key={i} className="rounded-xl bg-white/70 p-3 text-sm"><div className="font-semibold">{event.tool||event.type.replaceAll('_',' ')}</div><div className="whitespace-pre-wrap text-ink/65">{event.text}</div></div>)}</div>}
+{approval&&<div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="font-bold text-amber-900">{approval.tool==='send_email'?'Confirm email send':'Confirm task creation'}</div>{approval.tool==='send_email'?<><div className="mt-2 text-sm"><b>To:</b> {approval.details.to}</div><div className="mt-1 text-sm"><b>Subject:</b> {approval.details.subject}</div><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-white/80 p-2 text-xs">{approval.details.body}</pre></>:<div className="mt-2 text-sm"><b>{approval.details.title}</b><div>{approval.details.description}</div></div>}<div className="mt-3 flex gap-2"><button className="btn flex-1" disabled={approvalBusy} onClick={()=>resolve(true)}><Check size={16}/>{approval.tool==='send_email'?'Approve send':'Approve task'}</button><button className="btn2 flex-1 !text-rose-600" disabled={approvalBusy} onClick={()=>resolve(false)}><X size={16}/>Reject</button></div></div>}
+</Card></div></Page>}
 
 export function Space(){
 const{tasks,addTask,updateTask,deleteTask,toggleTask}=useApp();const[sp]=useSearchParams();
@@ -78,14 +121,13 @@ return <Page title="My Space" sub="All your tasks and projects in one place." ri
 {m&&<TaskModal task={m.id?m:null} onClose={()=>setM(null)} onSave={t=>t.id?updateTask(t):addTask(t)}/>}</Page>}
 
 export function Approvals(){
-const{proposals,decide}=useApp();const[tab,setTab]=useState('pending');const[ed,setEd]=useState({});
+const{proposals,decide}=useApp();const[tab,setTab]=useState('pending');
 const list=proposals.filter(p=>p.status===tab);
-const tasksOf=p=>ed[p.id]||p.tasks;const chg=(p,id,k,v)=>setEd({...ed,[p.id]:tasksOf(p).map(t=>t.id===id?{...t,[k]:v}:t)});
-return <Page title="Approvals" sub="Nothing is created until you approve it.">
+return <Page title="Approvals" sub="External actions do not run until you approve them.">
 <div className="glass !rounded-xl inline-flex p-1">{['pending','approved','rejected'].map(t=><button key={t} onClick={()=>setTab(t)} className={'rounded-lg px-4 py-1.5 text-sm font-semibold capitalize '+(tab===t?'bg-brand-600 text-white':'')}>{t} ({proposals.filter(p=>p.status===t).length})</button>)}</div>
 <div className="grid gap-4 lg:grid-cols-2">{list.map(p=><Card key={p.id}><div className="mb-3 flex items-start justify-between gap-2"><div><h3 className="font-bold">{p.title}</h3><p className="text-xs text-ink/55">{p.source} · {tm(p.created)}</p></div><span className="chip bg-brand-100 text-brand-700 capitalize">{p.status}</span></div>
-<div className="space-y-2">{tasksOf(p).map(t=>p.status==='pending'?<div key={t.id} className="flex flex-wrap gap-2"><input className="inp flex-1" value={t.title} onChange={e=>chg(p,t.id,'title',e.target.value)}/><input type="date" className="inp !w-auto" value={t.due} onChange={e=>chg(p,t.id,'due',e.target.value)}/></div>:<div key={t.id} className="flex items-center gap-2 text-sm"><Pri p={t.priority}/>{t.title}<span className="ml-auto text-xs text-ink/55">{fmtD(t.due)}</span></div>)}</div>
-{p.status==='pending'&&<div className="mt-4 flex gap-2"><button className="btn flex-1" onClick={()=>decide(p.id,true,tasksOf(p))}><Check size={16}/>Approve</button><button className="btn2 flex-1 !text-rose-600" onClick={()=>decide(p.id,false)}><X size={16}/>Reject</button></div>}</Card>)}</div>
+{p.action==='send_email'?<div className="space-y-2 rounded-xl bg-white/70 p-3 text-sm"><div><b>To:</b> {p.payload?.to}</div><div><b>Subject:</b> {p.payload?.subject}</div><pre className="whitespace-pre-wrap">{p.payload?.body}</pre></div>:<div className="space-y-2">{p.tasks.map(t=><div key={t.id} className="rounded-xl bg-white/70 p-3 text-sm"><div className="font-semibold">{t.title}</div>{t.description&&<div className="mt-1 text-ink/65">{t.description}</div>}<div className="mt-1 flex items-center gap-2"><Pri p={t.priority}/>{t.due&&<span className="text-xs text-ink/55">{fmtD(t.due)}</span>}</div></div>)}</div>}
+{p.status==='pending'&&<div className="mt-4 flex gap-2"><button className="btn flex-1" onClick={()=>decide(p.id,true)}><Check size={16}/>{p.action==='send_email'?'Approve and send':'Approve'}</button><button className="btn2 flex-1 !text-rose-600" onClick={()=>decide(p.id,false)}><X size={16}/>Reject</button></div>}</Card>)}</div>
 {!list.length&&<Empty text={`No ${tab} proposals. Generate a plan in Agent Studio.`}/>}</Page>}
 
 export function ActivityPage(){

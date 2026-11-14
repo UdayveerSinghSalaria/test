@@ -60,12 +60,14 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="")
     llm_api_key: str = Field(default="")
 
-    # --- Legacy Activepieces settings (not used for individual user mail) ---
+    # --- Activepieces mailbox ------------------------------------------------
     activepieces_base_url: str = Field(default="https://cloud.activepieces.com/api/v1")
     activepieces_api_key: str = Field(default="")
     activepieces_project_id: str = Field(default="")
     activepieces_search_flow_id: str = Field(default="")
     activepieces_get_flow_id: str = Field(default="")
+    activepieces_send_flow_id: str = Field(default="")
+    activepieces_allowed_user_email: str = Field(default="")
 
     # --- Validators ---------------------------------------------------------
     @field_validator("cors_origins")
@@ -87,7 +89,14 @@ class Settings(BaseSettings):
 
     @property
     def llm_configured(self) -> bool:
-        return bool(self.llm_provider and self.llm_api_key and self.llm_model)
+        provider = self.llm_provider.strip().lower()
+        endpoint_configured = provider == "anthropic" or bool(self.llm_base_url.strip())
+        return bool(
+            provider
+            and self.llm_api_key
+            and self.llm_model
+            and endpoint_configured
+        )
 
     def validate_security(self) -> None:
         """Raise with actionable messages when security config is missing."""

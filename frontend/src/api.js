@@ -22,6 +22,40 @@ async function apiRequest(path, options = {}) {
   return text ? JSON.parse(text) : undefined;
 }
 
+async function streamRequest(path, payload, onEvent) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    throw new Error(err.detail || `Request failed (${res.status})`);
+  }
+  if (!res.body) throw new Error('The assistant response stream is unavailable.');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const emitLines = () => {
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(line => {
+      if (line.trim()) onEvent(JSON.parse(line));
+    });
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    emitLines();
+    if (done) break;
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer));
+}
+
 export const api = {
   // Auth
   login: (email, password) => apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
@@ -38,8 +72,10 @@ export const api = {
 
   // Approvals
   getApprovals: () => apiRequest('/approvals?status=all'),
-  createApproval: (proposal) => apiRequest('/approvals', { method: 'POST', body: JSON.stringify(proposal) }),
-  decideApproval: (id, decision) => apiRequest(`/approvals/${id}`, { method: 'PATCH', body: JSON.stringify(decision) }),
+  decideApproval: (id, decision) => apiRequest(`/approvals/${id}/${decision.approved ? 'approve' : 'reject'}`, { method: 'POST' }),
+
+  // Agent
+  streamAssistant: (message, onEvent) => streamRequest('/assistant/run', { message }, onEvent),
 
   // Activity
   getActivity: () => apiRequest('/activity'),

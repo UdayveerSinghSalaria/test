@@ -170,17 +170,18 @@ async def google_disconnect(
 
 
 # ---------------------------------------------------------------------------
-# Activepieces status (one shared mailbox visible to signed-in users)
+# Activepieces status (mailbox restricted to its configured app account)
 # ---------------------------------------------------------------------------
 @router.get("/activepieces/status", response_model=SharedMailboxOut | None)
 async def activepieces_status(
     user: User = Depends(get_session_user),
 ):
-    """Report the shared Activepieces mailbox without exposing its account address."""
-    if not get_activepieces_service().is_configured:
+    """Report the allowlisted Activepieces mailbox without exposing its address."""
+    service = get_activepieces_service()
+    if not service.is_configured or not service.is_allowed_user(user.email):
         return None
     return SharedMailboxOut(
         provider="activepieces",
-        mailbox="Shared teammate mailbox",
-        can_send=False,
+        mailbox="Your Activepieces mailbox",
+        can_send=service.can_send,
     )

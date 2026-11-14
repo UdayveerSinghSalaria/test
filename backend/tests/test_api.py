@@ -103,6 +103,18 @@ def test_google_oauth_credentials_must_be_configured_as_a_pair():
         settings.validate_security()
 
 
+def test_openai_compatible_llm_requires_a_base_url():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="openai-compatible",
+        llm_model="model",
+        llm_api_key="secret",
+    )
+    assert not settings.llm_configured
+    settings.llm_base_url = "https://integrate.api.nvidia.com/v1"
+    assert settings.llm_configured
+
+
 # ---------------------------------------------------------------------------
 # HTML sanitization (email content is untrusted)
 # ---------------------------------------------------------------------------
@@ -289,6 +301,98 @@ def test_activepieces_mail_maps_messages_and_search_filters():
     }
 
 
+def test_activepieces_send_uses_configured_flow(monkeypatch):
+    from app.config import Settings
+
+    monkeypatch.setattr(
+        "app.services.activepieces_service.settings",
+        Settings(
+            _env_file=None,
+            activepieces_api_key="key",
+            activepieces_search_flow_id="search",
+            activepieces_get_flow_id="get",
+            activepieces_send_flow_id="send",
+        ),
+    )
+    svc = ActivepiecesService()
+    captured = {}
+
+    def call_sync(flow_id, payload):
+        captured.update(flow_id=flow_id, payload=payload)
+        return {"messageId": "sent-message"}
+
+    monkeypatch.setattr(svc, "_call_sync", call_sync)
+    assert svc.send("recipient@example.com", "Subject", "Body") == {
+        "id": "sent-message",
+        "thread_id": "",
+    }
+    assert captured == {
+        "flow_id": "send",
+        "payload": {
+            "to": "recipient@example.com",
+            "subject": "Subject",
+            "body": "Body",
+        },
+    }
+
+
+def test_agent_can_search_and_read_allowlisted_activepieces_mail(
+    auth_client: TestClient, monkeypatch
+):
+    import asyncio
+
+    from app.agents.tools import ToolContext, execute_tool
+    from app.database import get_db
+    from app.models import User
+    from sqlalchemy import select
+
+    class StubActivepieces:
+        is_configured = True
+
+        def is_allowed_user(self, email):
+            return email == "tester@example.com"
+
+        def search(self, user_id, q, max_results):
+            assert q == "is:unread"
+            return [
+                EmailSummary(
+                    id="mail-1",
+                    sender_name="Sender",
+                    sender_email="sender@example.com",
+                    subject="Unread message",
+                )
+            ]
+
+        def get_detail(self, user_id, message_id):
+            assert message_id == "mail-1"
+            return EmailDetail(
+                id=message_id,
+                sender_name="Sender",
+                sender_email="sender@example.com",
+                subject="Unread message",
+                body_text="Full message body",
+            )
+
+    monkeypatch.setattr(
+        "app.agents.tools.get_activepieces_service", lambda: StubActivepieces()
+    )
+    me = auth_client.get("/api/auth/me").json()
+    db = next(get_db())
+    try:
+        user = db.scalar(select(User).where(User.id == me["id"]))
+        result = asyncio.run(
+            execute_tool(
+                "search_emails",
+                {"query": "is:unread", "include_body": True},
+                ToolContext(user_id=user.id, db=db, run_id="read-test"),
+            )
+        )
+        assert result["count"] == 1
+        assert result["emails"][0]["body"] == "Full message body"
+    finally:
+        db.close()
+
+
 def test_gmail_auth_error_maps_to_friendly():
     class StubTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -448,6 +552,10 @@ def test_shared_activepieces_mail_is_used_when_configured(
 ):
     class StubActivepieces:
         is_configured = True
+        can_send = False
+
+        def is_allowed_user(self, email):
+            return email == "tester@example.com"
 
         def search(self, user_id, q, max_results):
             assert q == "subject:invoice"
@@ -482,7 +590,78 @@ def test_shared_activepieces_mail_is_used_when_configured(
         json={"to": "recipient@example.com", "subject": "Hello", "body": "Message"},
     )
     assert send.status_code == 409
-    assert "shared" in send.json()["detail"].lower()
+    assert "agent studio" in send.json()["detail"].lower()
+
+
+def test_activepieces_mail_is_hidden_from_non_owner(auth_client: TestClient, monkeypatch):
+    class RestrictedMailbox:
+        is_configured = True
+
+        def is_allowed_user(self, email):
+            return False
+
+    monkeypatch.setattr(
+        "app.api.emails.get_activepieces_service", lambda: RestrictedMailbox()
+    )
+    response = auth_client.get("/api/emails")
+    assert response.status_code == 403
+
+
+def test_agent_email_send_executes_only_after_approval(
+    auth_client: TestClient, monkeypatch
+):
+    from app.database import get_db
+    from app.models import Approval, User
+    from sqlalchemy import select
+
+    class StubActivepieces:
+        is_configured = True
+        can_send = True
+
+        def is_allowed_user(self, email):
+            return email == "tester@example.com"
+
+        def send(self, recipient, subject, body):
+            sent.append((recipient, subject, body))
+            return {"id": "sent-message", "thread_id": ""}
+
+    sent = []
+    service = StubActivepieces()
+    monkeypatch.setattr("app.api.emails.get_activepieces_service", lambda: service)
+    monkeypatch.setattr("app.api.approvals.get_activepieces_service", lambda: service)
+    monkeypatch.setattr("app.agents.tools.get_activepieces_service", lambda: service)
+
+    me = auth_client.get("/api/auth/me").json()
+    db = next(get_db())
+    try:
+        user = db.scalar(select(User).where(User.id == me["id"]))
+        approval = Approval(
+            user_id=user.id,
+            action="send_email",
+            payload={
+                "tool": "send_email",
+                "arguments": {
+                    "to": "recipient@example.com",
+                    "subject": "Approved",
+                    "body": "Message body",
+                },
+            },
+            run_id="agent-run",
+        )
+        db.add(approval)
+        db.commit()
+        approval_id = approval.id
+
+        response = auth_client.post(f"/api/approvals/{approval_id}/approve")
+        assert response.status_code == 200
+        assert response.json()["status"] == "approved"
+        assert sent == [("recipient@example.com", "Approved", "Message body")]
+        assert auth_client.post(
+            f"/api/approvals/{approval_id}/approve"
+        ).status_code == 409
+        assert len(sent) == 1
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +731,9 @@ def test_create_task_tool_requires_approval(auth_client: TestClient):
             )
         )
         assert result["status"] == "approval_required"
-        approvals = list(db.scalars(select(Approval)))
+        approvals = list(
+            db.scalars(select(Approval).where(Approval.run_id == "run-test"))
+        )
         assert len(approvals) == 1
         assert approvals[0].action == "create_task"
 

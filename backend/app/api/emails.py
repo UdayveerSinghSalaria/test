@@ -1,4 +1,4 @@
-"""Email API: proxies real Gmail data to the frontend (sanitized)."""
+"""Email API: proxies the configured mail provider to the frontend (sanitized)."""
 
 from __future__ import annotations
 
@@ -34,8 +34,14 @@ async def _gmail_token(user: User, db: Session) -> str:
 
 
 def _provider_for(user: User, db: Session) -> str:
-    """Prefer the configured shared Activepieces mailbox; otherwise use user Gmail."""
-    if get_activepieces_service().is_configured:
+    """Prefer the allowlisted Activepieces mailbox; otherwise use user Gmail."""
+    activepieces = get_activepieces_service()
+    if activepieces.is_configured:
+        if not activepieces.is_allowed_user(user.email):
+            raise HTTPException(
+                status_code=403,
+                detail="The Activepieces mailbox is restricted to its configured SaarthiFlow account.",
+            )
         return "activepieces"
     integration = TokenService().get_integration(db, user.id)
     if integration and integration.encrypted_access_token:
@@ -67,7 +73,7 @@ async def list_emails(
     if provider != "google":
         raise HTTPException(
             status_code=409,
-            detail="No mail provider is configured. Connect Google or configure the shared Activepieces mailbox.",
+            detail="No mail provider is configured. Connect Google or configure your Activepieces mailbox.",
         )
 
     token = await _gmail_token(user, db)
@@ -102,7 +108,7 @@ async def get_email(
     if provider != "google":
         raise HTTPException(
             status_code=409,
-            detail="No mail provider is configured. Connect Google or configure the shared Activepieces mailbox.",
+            detail="No mail provider is configured. Connect Google or configure your Activepieces mailbox.",
         )
 
     token = await _gmail_token(user, db)
@@ -122,7 +128,7 @@ async def send_email(
     if _provider_for(user, db) == "activepieces":
         raise HTTPException(
             status_code=409,
-            detail="Sending from the shared Activepieces mailbox is not enabled.",
+            detail="Send from Agent Studio so the message can be approved first.",
         )
     integration = TokenService().get_integration(db, user.id)
     send_scope = "https://www.googleapis.com/auth/gmail.send"

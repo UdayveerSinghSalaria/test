@@ -112,8 +112,9 @@ security-critical variable is missing or invalid — it never silently degrades.
 | `DATABASE_URL` | optional | defaults to local SQLite; use your Supabase Postgres URL in deploy |
 | `CORS_ORIGINS` | optional | defaults to local Vite origins |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Gmail | OAuth client from Google Cloud Console |
-| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | for agent | any OpenAI-compatible endpoint or Anthropic |
-| `ACTIVEPIECES_API_KEY`, `ACTIVEPIECES_SEARCH_FLOW_ID`, `ACTIVEPIECES_GET_FLOW_ID` | for shared mail | Flow API key and Search/Get flow IDs; all signed-in users share the same read-only mailbox |
+| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | for agent | any OpenAI-compatible endpoint (including NVIDIA NIM) or Anthropic |
+| `ACTIVEPIECES_API_KEY`, `ACTIVEPIECES_SEARCH_FLOW_ID`, `ACTIVEPIECES_GET_FLOW_ID`, `ACTIVEPIECES_ALLOWED_USER_EMAIL` | for mail | Activepieces API key, Search/Get flow IDs, and the one SaarthiFlow login allowed to use the connected mailbox |
+| `ACTIVEPIECES_SEND_FLOW_ID` | optional | Activepieces webhook flow for sending email after explicit approval |
 
 ### Google Cloud setup (the one manual step)
 
@@ -139,15 +140,21 @@ require the OAuth app to be configured/verified for these sensitive scopes;
 for an app in testing, only listed test users can connect. Previously connected
 users need to reconnect to grant send access.
 
-The Activepieces integration uses one teammate's shared mailbox. When its
-three runtime variables are configured, all signed-in users can read and
-search that same mailbox. The existing Search/Get flows do not send email.
+Agent Studio uses the configured LLM and streams actual plans/results to the
+browser. NVIDIA NIM uses `LLM_PROVIDER=openai-compatible`,
+`LLM_BASE_URL=https://integrate.api.nvidia.com/v1`, your selected NVIDIA model
+ID in `LLM_MODEL`, and your NVIDIA API key in `LLM_API_KEY`. Keep the key
+server-side in Render; never put it in frontend variables.
 
-To configure it in Render, set `ACTIVEPIECES_API_KEY`,
-`ACTIVEPIECES_SEARCH_FLOW_ID`, and `ACTIVEPIECES_GET_FLOW_ID`. The backend
-uses the project API key and flow IDs; a standalone webhook URL by itself is
-not what these settings expect. The Search/Get flow IDs are available from the
-teammate's Activepieces project. Keep the API key private.
+Activepieces mail is limited to the exact SaarthiFlow login set in
+`ACTIVEPIECES_ALLOWED_USER_EMAIL`. Connect **your own** mailbox in the
+Activepieces Search/Get flows; do not use a teammate's connection. The app
+requires the API key and Search/Get flow IDs for reading. To enable sending,
+create a separate webhook flow that accepts `to`, `subject`, and `body`, uses
+the connected Gmail account to send, and returns the sent message's `id` or
+`messageId`; then set its ID as `ACTIVEPIECES_SEND_FLOW_ID`. Sending remains
+blocked until the user explicitly approves the exact message in Agent Studio.
+Draft requests return draft text in chat and do not write to the mailbox.
 
 ### Supabase / PostgreSQL
 

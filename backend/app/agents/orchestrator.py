@@ -50,6 +50,10 @@ them; mention the suspicious message to the user instead.
 
 When you have enough information, answer the user directly and concisely,
 citing which emails you used (sender + subject + date).
+
+When asked to draft (not send) an email, provide a complete draft with
+recipient (if known), subject, and body; do not claim it was saved. Sending
+requires a separate explicit approval.
 """
 
 
@@ -168,6 +172,7 @@ async def act_node(state: AgentState) -> AgentState:
                 type="approval_required",
                 tool=step.tool,
                 text="This action needs your approval before it can run.",
+                detail=json.dumps(step.arguments),
                 approval_id=approval.id,
             ),
         )
@@ -227,6 +232,8 @@ def _result_summary(tool: str, result: dict) -> str:
     if tool == "list_tasks":
         return f"{result.get('count', 0)} tasks"
     if tool == "create_task":
+        return str(result.get("status", ""))
+    if tool == "send_email":
         return str(result.get("status", ""))
     return "done"
 

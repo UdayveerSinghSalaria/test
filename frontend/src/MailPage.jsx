@@ -135,21 +135,21 @@ export default function MailPage() {
     }
   }
 
-  const isSharedMailbox = connection?.provider === 'activepieces';
-  const canSend = !isSharedMailbox && connection?.scopes?.includes('https://www.googleapis.com/auth/gmail.send');
+  const isActivepiecesMailbox = connection?.provider === 'activepieces';
+  const canSend = !isActivepiecesMailbox && connection?.scopes?.includes('https://www.googleapis.com/auth/gmail.send');
 
   if (loading) {
-    return <Page title="Mail" sub="Your personal Gmail inbox."><Card>Loading your Gmail connection…</Card></Page>;
+      return <Page title="Mail" sub="Your connected mailbox."><Card>Loading your email connection…</Card></Page>;
   }
 
   if (!connection) {
     return (
-      <Page title="Mail" sub="Shared teammate mailbox">
+      <Page title="Mail" sub="Connect your own mailbox">
         {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
         <Card className="max-w-2xl space-y-3">
-          <div className="flex items-center gap-3"><Mail className="text-brand-600" size={24}/><h2 className="text-lg font-bold">Shared mailbox is not configured</h2></div>
-          <p className="text-sm text-ink/65">An administrator must add ACTIVEPIECES_API_KEY, ACTIVEPIECES_SEARCH_FLOW_ID, and ACTIVEPIECES_GET_FLOW_ID to the backend’s Render environment. Once configured, every signed-in app user can read and search this mailbox.</p>
-          <p className="text-sm text-ink/65">The current Activepieces flows do not send mail.</p>
+          <div className="flex items-center gap-3"><Mail className="text-brand-600" size={24}/><h2 className="text-lg font-bold">Your mailbox is not configured for this account</h2></div>
+          <p className="text-sm text-ink/65">Connect your own Gmail account in the Activepieces Search/Get flows. Render must have ACTIVEPIECES_API_KEY, ACTIVEPIECES_SEARCH_FLOW_ID, ACTIVEPIECES_GET_FLOW_ID, and ACTIVEPIECES_ALLOWED_USER_EMAIL configured.</p>
+          <p className="text-sm text-ink/65">Agent Studio can draft email text in chat. Sending requires a configured Activepieces send flow and your approval.</p>
         </Card>
       </Page>
     );
@@ -158,18 +158,18 @@ export default function MailPage() {
   return (
     <Page
       title="Mail"
-      sub={isSharedMailbox ? connection.mailbox : `Connected as ${connection.provider_email || 'Google account'}`}
+      sub={isActivepiecesMailbox ? connection.mailbox : `Connected as ${connection.provider_email || 'Google account'}`}
       right={<div className="flex flex-wrap gap-2">
         <button className="btn2" disabled={busy} onClick={() => loadEmails({ search: query.trim() })}><RefreshCw size={16}/>Refresh</button>
-        {!isSharedMailbox && <button className="btn2 !text-rose-700" disabled={busy} onClick={disconnect}><Unplug size={16}/>Disconnect</button>}
+        {!isActivepiecesMailbox && <button className="btn2 !text-rose-700" disabled={busy} onClick={disconnect}><Unplug size={16}/>Disconnect</button>}
       </div>}
     >
       {notice && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
       {error && <p role="alert" className="flex items-center gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"><AlertCircle size={16}/>{error}</p>}
-      {isSharedMailbox && <Card className="text-sm text-ink/70">
-        This is a shared teammate mailbox. Everyone with SaarthiFlow access can read and search it; sending from it is disabled.
+      {isActivepiecesMailbox && <Card className="text-sm text-ink/70">
+        This is your Activepieces-connected mailbox, available only to the allowlisted SaarthiFlow account. Use Agent Studio to draft or prepare email; sending requires your explicit approval.
       </Card>}
-      {!isSharedMailbox && !canSend && <Card className="flex flex-wrap items-center justify-between gap-3">
+      {!isActivepiecesMailbox && !canSend && <Card className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink/70">Reconnect Google and approve the Gmail send permission to compose and send mail.</p>
         <a className="btn2" href={api.googleConnectUrl()}>Grant send access</a>
       </Card>}

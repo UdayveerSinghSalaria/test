@@ -23,12 +23,18 @@ function mapTask(t) {
 
 function mapProposal(p) {
   const payload = p.payload || {};
+  const args = payload.arguments || payload;
   const tasks = Array.isArray(p.tasks)
     ? p.tasks
-    : (p.action === 'create_task' ? [{ ...payload, id: p.id }] : []);
+    : (p.action === 'create_task' ? [{ ...args, id: p.id }] : []);
+  const title = p.action === 'send_email'
+    ? `Send email to ${args.to || 'recipient'}`
+    : (args.title || p.action || 'Proposed action');
   return {
     id: p.id,
-    title: p.title || payload.title || p.action || 'Proposed action',
+    title: p.title || title,
+    action: p.action,
+    payload: args,
     source: p.source || 'Agent',
     created: p.created_at,
     status: p.status,
@@ -56,19 +62,6 @@ function mapSettings(s) {
     role: s.role || '',
     weekStart: s.week_start || 'Mon',
     notify: s.notify ?? true,
-  };
-}
-
-function mapProposalCreate(p) {
-  return {
-    title: p.title,
-    source: p.source,
-    tasks: p.tasks.map(t => ({
-      title: t.title,
-      project: t.project,
-      priority: t.priority,
-      due: t.due,
-    })),
   };
 }
 
@@ -123,8 +116,14 @@ export function Store({ children }) {
     await loadAll();
   };
 
+  const refreshApprovals = async () => {
+    const proposals = await api.getApprovals();
+    set(a => ({ ...a, proposals: proposals.map(mapProposal) }));
+  };
+
   const apiWrapper = {
     ...s,
+    refreshApprovals,
     signIn: async (email, password) => {
       await api.login(email, password);
       await loadAll();
@@ -164,19 +163,9 @@ export function Store({ children }) {
       const updated = await api.toggleTask(id);
       set(a => log({ ...a, tasks: a.tasks.map(x => x.id === id ? { ...x, status: newStatus } : x) }, 'Task', (newStatus === 'done' ? 'Completed: ' : 'Reopened: ') + t.title, 'Status changed', 'My Space'));
     },
-    addProposal: async (p) => {
-      const proposal = await api.createApproval(mapProposalCreate(p));
-      set(a => log({ ...a, proposals: [mapProposal(proposal), ...a.proposals] }, 'Plan', 'Plan sent for approval: ' + proposal.title, proposal.tasks.length + ' proposed tasks', 'Agent Studio', 'Pending'));
-    },
-    decide: async (id, ok, tasks) => {
-      const decision = { approved: ok, tasks: tasks ? tasks.map(mapProposalCreate) : undefined };
-      await api.decideApproval(id, decision);
-      const p = s.proposals.find(x => x.id === id);
-      if (!p || p.status !== 'pending') return;
-      const list = tasks || p.tasks;
-      const np = { ...p, tasks: list, status: ok ? 'approved' : 'rejected', decided_at: Date.now() };
-      const nt = ok ? list.map(t => ({ ...t, id: uid(), status: 'todo' })) : [];
-      set(a => log({ ...a, proposals: a.proposals.map(x => x.id === id ? np : x), tasks: [...nt.map(mapTask), ...a.tasks] }, 'Approval', (ok ? 'Approved: ' : 'Rejected: ') + p.title, ok ? nt.length + ' tasks created in My Space' : 'No tasks created', 'Approvals', ok ? 'Completed' : 'Rejected'));
+    decide: async (id, ok) => {
+      await api.decideApproval(id, { approved: ok });
+      await loadAll();
     },
     logOnly: (type, title, detail, source) => set(a => log(a, type, title, detail, source)),
     saveSettings: async (v) => {

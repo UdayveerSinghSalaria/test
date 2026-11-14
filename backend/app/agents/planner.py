@@ -40,16 +40,21 @@ class ExecutionPlan(BaseModel):
 
 PLANNER_SYSTEM = """You are the planning module of a personal work assistant.
 Given the user's instruction, produce a plan that uses ONLY these tools:
-- search_emails: Gmail search (query syntax)
+- search_emails: search mail; set include_body=true when the user asks to read, summarize, or analyze messages
 - fetch_email: read one email by id
 - list_tasks: list the user's tasks
 - create_task: create a task (requires user approval)
+- send_email: send an email (requires user approval of the exact recipient, subject, and body)
 - respond: answer directly with no tool use
 
 Rules:
 - Prefer search_emails over fetching blindly.
+- For a request to read or summarize matching emails, search with include_body=true.
+- For a request to draft a reply to an existing email, search with include_body=true, then provide the complete draft in the answer; do not write to the mailbox.
+- For a request to draft a new email without existing-message context, use respond and include the complete draft in the answer; do not write to the mailbox.
+- If sending details are missing, use respond to ask for them instead of inventing them.
 - Set needs_gmail true if any step touches email.
-- Set writes_data true if any step calls create_task.
+- Set writes_data true if any step calls create_task or send_email.
 - Keep steps minimal: 1-4 steps for most requests.
 Return ONLY JSON matching this schema:
 {"intent": str, "steps": [{"step": int, "tool": str, "reasoning": str, "arguments": {}}], "needs_gmail": bool, "writes_data": bool}
