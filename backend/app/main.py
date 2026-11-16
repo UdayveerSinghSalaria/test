@@ -1,123 +1,76 @@
-"""FastAPI application entrypoint.
-
-Security posture:
-  * Fail-fast configuration validation (missing secrets refuse startup).
-  * Strict CORS: only the configured frontend origin, credentials allowed.
-  * Google OAuth and Gmail live entirely on this backend.
-"""
-
-from __future__ import annotations
-
-import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import traceback
 
-from .config import get_settings
-from .database import init_db
-from .services.google_oauth import OAuthError
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+from app.config import settings
+from app.database import init_db, close_db
+from app.api import (
+    health_router,
+    tasks_router,
+    projects_router,
+    agent_router,
+    approvals_router,
+    activity_router,
+    analytics_router,
+    settings_router,
+    email_router,
+    auth_router,
 )
-logger = logging.getLogger(__name__)
-
-settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings.validate_security()  # refuses to run with missing/broken secrets
-    init_db()
-    logger.info(
-        "%s started (env=%s, db=%s, llm=%s)",
-        settings.app_name,
-        settings.app_env,
-        settings.database_url.split("://")[0],
-        "configured" if settings.llm_configured else "not configured",
-    )
+    # Startup
+    await init_db()
     yield
+    # Shutdown
+    await close_db()
 
 
 app = FastAPI(
-    title=settings.app_name,
-    version="0.1.0",
+    title="SaarthiFlow API",
+    version="1.0.0",
+    description="Agentic personal work assistant - FastAPI backend",
     lifespan=lifespan,
-    docs_url="/api/docs" if not settings.is_production else None,
-    openapi_url="/api/openapi.json" if not settings.is_production else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
+    )
+
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,  # session cookie is cross-origin (3000 -> 8000)
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type"],
-    max_age=600,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
-@app.exception_handler(OAuthError)
-async def oauth_error_handler(request: Request, exc: OAuthError) -> JSONResponse:
-    """OAuth failures are user-facing but never leak internals."""
-    return JSONResponse(status_code=409, content={"detail": str(exc)})
-
-
-@app.get("/api/health")
-def health() -> dict:
-    return {
-        "status": "ok",
-        "app_name": settings.app_name,
-        "llm_configured": settings.llm_configured,
-        "google_oauth_configured": bool(
-            settings.google_client_id and settings.google_client_secret
-        ),
-    }
+# Include routers with /api prefix
+app.include_router(health_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+app.include_router(tasks_router, prefix="/api")
+app.include_router(projects_router, prefix="/api")
+app.include_router(agent_router, prefix="/api")
+app.include_router(approvals_router, prefix="/api")
+app.include_router(activity_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
+app.include_router(email_router, prefix="/api")
 
 
-@app.get("/health")
-def health_root() -> dict:
-    return {
-        "status": "ok",
-        "app_name": settings.app_name,
-        "llm_configured": settings.llm_configured,
-        "google_oauth_configured": bool(
-            settings.google_client_id and settings.google_client_secret
-        ),
-    }
-
-
-@app.get("/")
-def root() -> dict:
-    return {
-        "name": settings.app_name,
-        "version": "0.1.0",
-        "docs": "/api/docs",
-        "health": "/health",
-    }
-
-
-# --- routes -----------------------------------------------------------------
-from .api import (  # noqa: E402  (routers need `app` defined)
-    activity,
-    approvals,
-    assistant,
-    auth,
-    emails,
-    integrations,
-    tasks,
-)
-
-for router in (
-    auth.router,
-    integrations.router,
-    emails.router,
-    tasks.router,
-    approvals.router,
-    activity.router,
-    assistant.router,
-):
-    app.include_router(router)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=settings.PORT, reload=settings.ENVIRONMENT == "development")

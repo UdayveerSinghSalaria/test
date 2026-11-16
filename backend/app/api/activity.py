@@ -1,29 +1,28 @@
-"""Activity history API — the agent's audit trail (no email bodies)."""
-
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from typing import List, Optional
 
-from ..database import get_db
-from ..models import Activity, User
-from ..schemas import ActivityOut
-from .deps import get_session_user
+from app.database import get_db
+from app.models.activity import Activity
+from app.schemas.activity import ActivityResponse
+from app.dependencies import get_current_user, get_db_session
+from app.models.user import User
 
-router = APIRouter(prefix="/api/activity", tags=["activity"])
+router = APIRouter(prefix="/activity", tags=["Activity"])
 
 
-@router.get("", response_model=list[ActivityOut])
-def list_activity(
-    limit: int = Query(default=50, ge=1, le=200),
-    user: User = Depends(get_session_user),
-    db: Session = Depends(get_db),
-) -> list[Activity]:
-    stmt = (
-        select(Activity)
-        .where(Activity.user_id == user.id)
-        .order_by(Activity.created_at.desc())
-        .limit(limit)
-    )
-    return list(db.scalars(stmt))
+@router.get("", response_model=List[ActivityResponse])
+async def get_activity(
+    status: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get activity logs with optional status filter."""
+    query = select(Activity).where(Activity.user_id == current_user.id).order_by(desc(Activity.timestamp))
+    if status and status != "All":
+        query = query.where(Activity.status == status)
+
+    result = await db.execute(query)
+    activities = result.scalars().all()
+    return [ActivityResponse(**a.to_dict()) for a in activities]

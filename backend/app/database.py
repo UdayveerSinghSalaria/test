@@ -1,44 +1,38 @@
-"""SQLAlchemy engine/session setup (PostgreSQL via Supabase, SQLite for dev)."""
-
-from __future__ import annotations
-
-from collections.abc import Generator
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
-
-from .config import get_settings
-
-settings = get_settings()
-
-connect_args: dict = {}
-if settings.database_url.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
-
-engine = create_engine(
-    settings.database_url,
-    connect_args=connect_args,
-    pool_pre_ping=True,
-)
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+from app.config import settings
 
 
 class Base(DeclarativeBase):
     pass
 
 
-def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency: one Session per request, always closed."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.ENVIRONMENT == "development",
+    future=True,
+)
+
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
 
-def init_db() -> None:
-    """Create tables if they do not exist (dev convenience; use migrations in prod)."""
-    from . import models  # noqa: F401  (register mappers)
+async def get_db() -> AsyncSession:
+    async with async_session_maker() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
-    Base.metadata.create_all(bind=engine)
+
+async def init_db():
+    """Create all tables."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db():
+    await engine.dispose()

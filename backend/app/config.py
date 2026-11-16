@@ -1,140 +1,66 @@
-"""Central application configuration.
-
-All environment parsing lives here. Security-critical values are *required*:
-if they are missing the application fails loudly at startup rather than
-silently downgrading to an insecure mode.
-"""
-
-from __future__ import annotations
-
-from functools import lru_cache
-from pathlib import Path
-
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-BACKEND_DIR = Path(__file__).resolve().parent.parent
+from pydantic_settings import BaseSettings
+from pydantic import Field
+from typing import List, Optional
+import os
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=BACKEND_DIR / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    # Database
+    DATABASE_URL: str = "sqlite+aiosqlite:///./saarthiflow.db"
 
-    # --- Application --------------------------------------------------------
-    app_name: str = Field(default="AI Work Assistant")
-    app_env: str = Field(default="development")
-    backend_url: str = Field(default="http://localhost:8000")
-    frontend_url: str = Field(default="http://localhost:5174")
+    # NVIDIA Nemotron
+    NVIDIA_API_KEY: str = ""
+    NVIDIA_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
 
-    # --- Database -----------------------------------------------------------
-    database_url: str = Field(default=f"sqlite:///{BACKEND_DIR / 'assistant.db'}")
+    # SMTP (for sending emails)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "SaarthiFlow <noreply@saarthiflow.com>"
 
-    # --- Security (required) ------------------------------------------------
-    session_secret: str = Field(default="")
-    credentials_encryption_key: str = Field(default="")
-    cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:5174"
-    )
-    session_max_age: int = Field(default=60 * 60 * 24 * 7)  # 7 days
+    # IMAP defaults (per-user settings override these)
+    IMAP_HOST: str = "imap.gmail.com"
+    IMAP_PORT: int = 993
 
-    # --- Google OAuth -------------------------------------------------------
-    google_client_id: str = Field(default="")
-    google_client_secret: str = Field(default="")
-    google_redirect_uri: str = Field(
-        default="http://localhost:8000/api/integrations/google/callback"
-    )
-    google_auth_uri: str = "https://accounts.google.com/o/oauth2/v2/auth"
-    google_token_uri: str = "https://oauth2.googleapis.com/token"
-    google_userinfo_uri: str = "https://openidconnect.googleapis.com/v1/userinfo"
-    gmail_scopes: str = (
-        "openid email profile https://www.googleapis.com/auth/gmail.readonly "
-        "https://www.googleapis.com/auth/gmail.send"
-    )
+    # Activepieces (fallback)
+    ACTIVEPIECES_API_KEY: str = ""
+    ACTIVEPIECES_BASE_URL: str = "https://cloud.activepieces.com/api/v1"
+    ACTIVEPIECES_SEARCH_FLOW_ID: str = ""
+    ACTIVEPIECES_GET_FLOW_ID: str = ""
 
-    # --- LLM (optional; agent features disabled when unset) ------------------
-    llm_provider: str = Field(default="")
-    llm_base_url: str = Field(default="")
-    llm_model: str = Field(default="")
-    llm_api_key: str = Field(default="")
+    # Security
+    SECRET_KEY: str = Field(default="", min_length=32)
+    FERNET_KEY: str = Field(default="", min_length=32)
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
-    # --- Activepieces mailbox ------------------------------------------------
-    activepieces_base_url: str = Field(default="https://cloud.activepieces.com/api/v1")
-    activepieces_api_key: str = Field(default="")
-    activepieces_project_id: str = Field(default="")
-    activepieces_search_flow_id: str = Field(default="")
-    activepieces_get_flow_id: str = Field(default="")
-    activepieces_send_flow_id: str = Field(default="")
-    activepieces_allowed_user_email: str = Field(default="")
+    # CORS
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174"
 
-    # --- Validators ---------------------------------------------------------
-    @field_validator("cors_origins")
-    @classmethod
-    def _strip_origins(cls, v: str) -> str:
-        return v.strip()
+    # Environment
+    ENVIRONMENT: str = "development"
+    PORT: int = 8000
 
     @property
-    def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-
-    @property
-    def google_scope_list(self) -> list[str]:
-        return self.gmail_scopes.split()
+    def cors_origins_list(self) -> List[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
 
     @property
     def is_production(self) -> bool:
-        return self.app_env.lower() == "production"
+        return self.ENVIRONMENT == "production"
 
-    @property
-    def llm_configured(self) -> bool:
-        provider = self.llm_provider.strip().lower()
-        endpoint_configured = provider == "anthropic" or bool(self.llm_base_url.strip())
-        return bool(
-            provider
-            and self.llm_api_key
-            and self.llm_model
-            and endpoint_configured
-        )
-
-    def validate_security(self) -> None:
-        """Raise with actionable messages when security config is missing."""
-        problems: list[str] = []
-        if not self.session_secret or len(self.session_secret) < 32:
-            problems.append(
-                "SESSION_SECRET is missing or too short (>=32 chars required). "
-                "Generate one: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
-            )
-        if not self.credentials_encryption_key:
-            problems.append(
-                "CREDENTIALS_ENCRYPTION_KEY is missing. OAuth tokens must be "
-                "encrypted at rest; refusing to start in plaintext mode. "
-                "Generate one: python -c \"from cryptography.fernet import "
-                "Fernet; print(Fernet.generate_key().decode())\""
-            )
-        else:
-            from cryptography.fernet import Fernet
-
-            try:
-                Fernet(self.credentials_encryption_key.encode())
-            except Exception:
-                problems.append(
-                    "CREDENTIALS_ENCRYPTION_KEY is not a valid Fernet key. "
-                    "Regenerate: python -c \"from cryptography.fernet import "
-                    "Fernet; print(Fernet.generate_key().decode())\""
-                )
-        if bool(self.google_client_id) != bool(self.google_client_secret):
-            problems.append(
-                "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set "
-                "to enable Google OAuth, or both left empty to disable it."
-            )
-        if problems:
-            raise RuntimeError(
-                "Configuration errors (fix backend/.env):\n- " + "\n- ".join(problems)
-            )
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
 
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+settings = Settings()
+
+# Validate required settings on startup
+if not settings.SECRET_KEY:
+    raise ValueError("SECRET_KEY must be set in .env (min 32 chars)")
+
+if not settings.FERNET_KEY:
+    raise ValueError("FERNET_KEY must be set in .env (min 32 chars, use: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')")

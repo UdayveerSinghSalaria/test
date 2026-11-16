@@ -1,95 +1,168 @@
-"""Tasks API: user-scoped CRUD (agent-created tasks land here too)."""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
+from typing import List, Optional
+from datetime import date
+import uuid
 
-from __future__ import annotations
+from app.database import get_db
+from app.models.task import Task, TaskStatus, TaskPriority
+from app.models.project import Project
+from app.models.activity import Activity
+from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse
+from app.dependencies import get_current_user, get_db_session
+from app.models.user import User
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from ..database import get_db
-from ..models import Task, TaskPriority, TaskStatus, User
-from ..schemas import TaskCreate, TaskOut, TaskUpdate
-from .deps import get_session_user
-
-router = APIRouter(prefix="/api/tasks", tags=["tasks"])
-
-_STATUSES = {s.value for s in TaskStatus}
-_PRIORITIES = {p.value for p in TaskPriority}
-
-
-@router.get("", response_model=list[TaskOut])
-def list_tasks(
-    status: str | None = None,
-    user: User = Depends(get_session_user),
-    db: Session = Depends(get_db),
-) -> list[Task]:
-    stmt = select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc())
-    if status:
-        if status not in _STATUSES:
-            raise HTTPException(status_code=400, detail=f"Unknown status '{status}'")
-        stmt = stmt.where(Task.status == TaskStatus(status))
-    return list(db.scalars(stmt))
+router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
-@router.post("", response_model=TaskOut, status_code=201)
-def create_task(
-    body: TaskCreate,
-    user: User = Depends(get_session_user),
-    db: Session = Depends(get_db),
-) -> Task:
-    if body.priority not in _PRIORITIES:
-        raise HTTPException(status_code=400, detail=f"Unknown priority '{body.priority}'")
+@router.get("", response_model=List[TaskResponse])
+async def get_tasks(
+    status: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    project: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get all tasks with optional filters."""
+    query = select(Task).where(Task.user_id == current_user.id).order_by(Task.due)
+
+    if status and status != "All":
+        try:
+            query = query.where(Task.status == TaskStatus(status))
+        except ValueError:
+            pass
+
+    if priority and priority != "All":
+        try:
+            query = query.where(Task.priority == TaskPriority(priority))
+        except ValueError:
+            pass
+
+    if project and project != "All":
+        query = query.where(Task.project == project)
+
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+    return [TaskResponse(**t.to_dict()) for t in tasks]
+
+
+@router.post("", response_model=TaskResponse, status_code=201)
+async def create_task(
+    task_data: TaskCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create a new task."""
+    # Ensure project exists
+    proj_result = await db.execute(select(Project).where(Project.name == task_data.project, Project.user_id == current_user.id))
+    project = proj_result.scalars().first()
+    if not project:
+        project = Project(id=f"p-{uuid.uuid4().hex[:12]}", user_id=current_user.id, name=task_data.project)
+        db.add(project)
+
     task = Task(
-        user_id=user.id,
-        title=body.title.strip(),
-        description=body.description.strip(),
-        priority=TaskPriority(body.priority),
-        due_date=body.due_date,
-        source=body.source,
+        id=f"t-{uuid.uuid4().hex[:12]}",
+        user_id=current_user.id,
+        title=task_data.title,
+        project=task_data.project,
+        priority=TaskPriority(task_data.priority),
+        status=TaskStatus(task_data.status),
+        due=task_data.due,
     )
     db.add(task)
-    db.commit()
-    db.refresh(task)
-    return task
+
+    # Log activity
+    activity = Activity(
+        id=f"act-{uuid.uuid4().hex[:12]}",
+        user_id=current_user.id,
+        type="Task",
+        title=f"Task created: {task.title}",
+        detail=f"{task.project} · due {task.due}",
+        source="My Space",
+        status="Completed",
+    )
+    db.add(activity)
+
+    await db.commit()
+    await db.refresh(task)
+    return TaskResponse(**task.to_dict())
 
 
-@router.patch("/{task_id}", response_model=TaskOut)
-def update_task(
+@router.patch("/{task_id}", response_model=TaskResponse)
+async def update_task(
     task_id: str,
-    body: TaskUpdate,
-    user: User = Depends(get_session_user),
-    db: Session = Depends(get_db),
-) -> Task:
-    task = db.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id))
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
-    if body.status is not None:
-        if body.status not in _STATUSES:
-            raise HTTPException(status_code=400, detail=f"Unknown status '{body.status}'")
-        task.status = TaskStatus(body.status)
-    if body.priority is not None:
-        if body.priority not in _PRIORITIES:
-            raise HTTPException(status_code=400, detail=f"Unknown priority '{body.priority}'")
-        task.priority = TaskPriority(body.priority)
-    if body.title is not None:
-        task.title = body.title.strip()
-    if body.description is not None:
-        task.description = body.description.strip()
-    if body.due_date is not None:
-        task.due_date = body.due_date
-    db.commit()
-    db.refresh(task)
-    return task
+    patch: TaskUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Update a task."""
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
+    task = result.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    update_data = patch.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "priority" and value:
+            setattr(task, field, TaskPriority(value))
+        elif field == "status" and value:
+            setattr(task, field, TaskStatus(value))
+        else:
+            setattr(task, field, value)
+
+    await db.commit()
+    await db.refresh(task)
+    return TaskResponse(**task.to_dict())
 
 
-@router.delete("/{task_id}", status_code=204)
-def delete_task(
+@router.delete("/{task_id}")
+async def delete_task(
     task_id: str,
-    user: User = Depends(get_session_user),
-    db: Session = Depends(get_db),
-) -> None:
-    task = db.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id))
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found.")
-    db.delete(task)
-    db.commit()
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Delete a task."""
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
+    task = result.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    title = task.title
+    await db.delete(task)
+
+    # Log activity
+    activity = Activity(
+        id=f"act-{uuid.uuid4().hex[:12]}",
+        user_id=current_user.id,
+        type="Task",
+        title=f"Task deleted: {title}",
+        detail="Removed from workspace",
+        source="My Space",
+        status="Completed",
+    )
+    db.add(activity)
+
+    await db.commit()
+    return {"message": "Task deleted", "task": {"id": task_id}}
+
+
+@router.post("/{task_id}/toggle", response_model=TaskResponse)
+async def toggle_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Toggle task status between todo and done."""
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == current_user.id))
+    task = result.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    new_status = TaskStatus.DONE if task.status == TaskStatus.TODO else TaskStatus.TODO
+    task.status = new_status
+
+    await db.commit()
+    await db.refresh(task)
+    return TaskResponse(**task.to_dict())
