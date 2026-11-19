@@ -12,11 +12,11 @@ export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const fetchUser = useCallback(async (token) => {
+  const fetchUser = useCallback(async () => {
     try {
-      const res = await api.get('/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-      return res.data;
-    } catch {
+      return await api.getMe();
+    } catch (error) {
+      if (error.status === 401) localStorage.removeItem('token');
       return null;
     }
   }, []);
@@ -24,7 +24,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      fetchUser(token).then(u => {
+      fetchUser().then(u => {
         setUser(u);
         setLoading(false);
       });
@@ -34,17 +34,17 @@ export function AuthProvider({ children }) {
   }, [fetchUser]);
 
   const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
-    localStorage.setItem('token', res.data.access_token);
-    setUser(res.data.user);
-    return res.data.user;
+    const result = await api.login({ email, password });
+    localStorage.setItem('token', result.access_token);
+    setUser(result.user);
+    return result.user;
   };
 
   const register = async (data) => {
-    const res = await api.post('/auth/register', data);
-    localStorage.setItem('token', res.data.access_token);
-    setUser(res.data.user);
-    return res.data.user;
+    const result = await api.register(data);
+    localStorage.setItem('token', result.access_token);
+    setUser(result.user);
+    return result.user;
   };
 
   const logout = () => {

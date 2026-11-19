@@ -1,5 +1,5 @@
 ﻿// Reusable API Client for SaarthiFlow
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : '');
 
 function getAuthHeaders() {
   const token = localStorage.getItem('token');
@@ -7,6 +7,9 @@ function getAuthHeaders() {
 }
 
 async function request(endpoint, options = {}) {
+  if (!API_BASE) {
+    throw new Error('Production API is not configured. Set VITE_API_URL to the deployed backend URL ending in /api.');
+  }
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const config = {
     ...options,
@@ -49,7 +52,7 @@ async function request(endpoint, options = {}) {
   }
 
   if (!res.ok) {
-    const errorMsg = data?.error || data?.message || `API request failed with status ${res.status}`;
+    const errorMsg = data?.detail || data?.error || data?.message || `API request failed with status ${res.status}`;
     const err = new Error(errorMsg);
     err.status = res.status;
     err.data = data;

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api } from './api.js';
+import { useAuth } from './auth.jsx';
 
 const C = createContext();
 export const useApp = () => useContext(C);
@@ -15,6 +16,7 @@ export const iso = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String
 export const TODAY = iso(2026, 10, 14);
 
 export function Store({ children }) {
+  const { user, loading: authLoading } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [activity, setActivity] = useState([]);
@@ -77,8 +79,27 @@ export function Store({ children }) {
   }, [settings]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setTasks([]);
+      setProposals([]);
+      setActivity([]);
+      setProjects([]);
+      setAnalytics(null);
+      setSettings({
+        name: 'Riya',
+        email: 'riya@example.com',
+        role: 'Student Developer',
+        weekStart: 'Mon',
+        notify: true,
+        demo: false
+      });
+      setBackendConnected(false);
+      setLoading(false);
+      return;
+    }
     refresh();
-  }, []);
+  }, [authLoading, user?.id]);
 
   // Task Mutations
   const addTask = async (t) => {
